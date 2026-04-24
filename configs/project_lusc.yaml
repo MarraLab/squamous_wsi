@@ -1,0 +1,63 @@
+project:
+  name: lusc
+
+paths:
+  project_dir: /projects/marralab/rcorbett_prj/LUSC
+  wsi_dir: /projects/marralab/rcorbett_prj/LUSC
+  cache_dir: /tmp/image_cache
+  stamp_table: /projects/marralab/rcorbett_prj/LUSC/clin.csv
+  clinical_features_table: /projects/marralab/rcorbett_prj/LUSC/260310LUSCrecurrence_deID.csv
+
+columns:
+  pred_id: patient
+  label: recur
+
+clinical:
+  id_col: final scan name
+  stage_col: stage_cont
+  date_surgery_col: date of surgery
+  date_followup_col: date of recurrence or most recent followup
+  event_col: recurrence (1=yes)
+  event_positive_value: 1
+  drop_missing_time: true
+
+  date_surgery_col: date of surgery
+  date_followup_col: date of recurrence or most recent followup
+
+  event_col: recurrence (1=yes)
+  event_positive_value: 1   # <-- critical
+  drop_missing_time: true  
+
+outputs:
+  preprocess_base: stamp_preprocess
+  crossval_base: stamp_crossval
+  analysis_output: stamp_analysis
+
+stamp:
+  device: cuda
+  max_workers: 16
+
+crossval:
+  task: classification
+  ground_truth_label: recur
+  patient_label: patient
+  filename_label: filename
+  n_splits: 5
+
+advanced_config:
+  seed: 42
+  max_epochs: 32
+  patience: 16
+  batch_size: 64
+  bag_size: 512
+  max_lr: 1e-4
+  div_factor: 25.0
+  model_name: vit
+  model_params:
+    vit:
+      dim_model: 512
+      dim_feedforward: 512
+      n_heads: 8
+      n_layers: 2
+      dropout: 0.25
+      use_alibi: false

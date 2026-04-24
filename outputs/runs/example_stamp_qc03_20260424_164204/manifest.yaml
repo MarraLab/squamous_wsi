@@ -1,0 +1,63 @@
+experiment:
+  name: example_stamp_qc03
+  description: Example STAMP run skeleton (prints commands only).
+project:
+  name: lusc
+paths:
+  project_dir: /projects/marralab/rcorbett_prj/LUSC
+  wsi_dir: /projects/marralab/rcorbett_prj/LUSC
+  clinical_table: /projects/marralab/rcorbett_prj/LUSC/clin.csv
+  cache_dir: /tmp/image_cache
+outputs:
+  preprocess_base: stamp_preprocess
+  crossval_base: stamp_crossval
+  analysis_output: stamp_analysis
+stamp:
+  device: cuda
+  max_workers: 16
+crossval:
+  task: classification
+  ground_truth_label: recur
+  patient_label: patient
+  filename_label: filename
+  n_splits: 5
+advanced_config:
+  seed: 42
+  max_epochs: 32
+  patience: 16
+  batch_size: 64
+  bag_size: 512
+  max_lr: 1e-4
+  div_factor: 25.0
+  model_name: vit
+  model_params:
+    vit:
+      dim_model: 512
+      dim_feedforward: 512
+      n_heads: 8
+      n_layers: 2
+      dropout: 0.25
+      use_alibi: false
+tile_filter:
+  enabled: true
+  model_path: /projects/marralab/rcorbett_prj/LUSC/tile_filter_model.joblib
+  threshold: 0.3
+  keep_mask_dir: /projects/marralab/rcorbett_prj/LUSC/tile_keep_masks
+  filtered_preprocess_base: /projects/marralab/rcorbett_prj/LUSC/stamp_preprocess_filtered
+models:
+- ctranspath
+- chief-ctranspath
+- uni2
+- dino-bloom
+- gigapath
+- h-optimus-0
+- h-optimus-1
+- virchow2
+- virchow
+- virchow-full
+- mstar
+- plip
+provenance:
+  project_yaml: configs/project_lusc.yaml
+  experiment_yaml: configs/experiments/example_stamp_qc03.yaml
+  run_dir: outputs/runs/example_stamp_qc03_20260424_164204
