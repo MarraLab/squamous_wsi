@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import io
 import os
+import shlex
 import subprocess
 import sys
 import zipfile
@@ -203,8 +204,16 @@ def _filter_feature_dir(
                 dst.write_bytes(extra.read_bytes())
 
 
-def _run(cmd: list[str], *, env: dict[str, str] | None = None, cwd: Path | None = None) -> None:
-    print(f"RUN: {' '.join(cmd)}")
+def _run(
+    cmd: list[str],
+    *,
+    dry_run: bool,
+    env: dict[str, str] | None = None,
+    cwd: Path | None = None,
+) -> None:
+    if dry_run:
+        print(shlex.join(cmd))
+        return
     subprocess.run(cmd, check=True, env=env, cwd=str(cwd) if cwd is not None else None)
 
 
@@ -216,13 +225,15 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--thresholds", type=str, required=True, help="Comma-separated thresholds, e.g. 0.1,0.2,0.3")
     ap.add_argument("--gpus", type=str, default="", help="Optional comma-separated CUDA_VISIBLE_DEVICES list (uses first).")
     ap.add_argument("--out_dir", type=Path, required=True)
+    ap.add_argument("--dry-run", action="store_true")
     return ap.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     thresholds = _parse_thresholds(args.thresholds)
-    args.out_dir.mkdir(parents=True, exist_ok=True)
+    if not args.dry_run:
+        args.out_dir.mkdir(parents=True, exist_ok=True)
 
     spec = load_experiment(args.project, args.experiment)
     cfg = spec.config
@@ -234,7 +245,7 @@ def main() -> None:
     if preprocess_out is None:
         raise RuntimeError(f"No existing preprocess output detected under {preprocess_base} for model {args.model}")
     input_feature_dir = preprocess_out
-    print(f"Using existing feature_dir (unfiltered): {input_feature_dir}")
+    print(f"Input feature_dir (unfiltered): {input_feature_dir}")
 
     cache_dir = Path(str(cfg.get("paths", {}).get("cache_dir", "/tmp/image_cache")))
 
@@ -256,21 +267,31 @@ def main() -> None:
 
     for thr in thresholds:
         thr_dir = args.out_dir / f"thr_{thr.tag}"
-        thr_dir.mkdir(parents=True, exist_ok=True)
+        if not args.dry_run:
+            thr_dir.mkdir(parents=True, exist_ok=True)
 
         filtered_feature_dir = thr_dir / "filtered_feature_dir" / args.model / input_feature_dir.name
-        if not filtered_feature_dir.exists() or not list(filtered_feature_dir.glob("*.h5")):
-            print(f"\n=== Threshold {thr.value} (build filtered features) ===")
-            _filter_feature_dir(
-                input_dir=input_feature_dir,
-                output_dir=filtered_feature_dir,
-                cache_dir=cache_dir,
-                threshold=thr.value,
-                model=tile_model,
-                feature_names=feature_names,
-            )
+        print("\n---")
+        print(f"threshold: {thr.value}")
+        print(f"output directory: {thr_dir}")
+        print(f"input feature_dir: {input_feature_dir}")
+        print(f"filtered feature_dir: {filtered_feature_dir}")
+
+        if args.dry_run:
+            print(f"(dry-run) Would build filtered features at: {filtered_feature_dir}")
         else:
-            print(f"\n=== Threshold {thr.value} (reuse filtered features) ===")
+            if not filtered_feature_dir.exists() or not list(filtered_feature_dir.glob("*.h5")):
+                print(f"\n=== Threshold {thr.value} (build filtered features) ===")
+                _filter_feature_dir(
+                    input_dir=input_feature_dir,
+                    output_dir=filtered_feature_dir,
+                    cache_dir=cache_dir,
+                    threshold=thr.value,
+                    model=tile_model,
+                    feature_names=feature_names,
+                )
+            else:
+                print(f"\n=== Threshold {thr.value} (reuse filtered features) ===")
 
         crossval_out_dir = thr_dir / "stamp_crossval" / args.model
         analysis_out_dir = thr_dir / "analysis" / args.model
@@ -281,12 +302,20 @@ def main() -> None:
         stamp_cfg["crossval"]["output_dir"] = str(crossval_out_dir)
 
         cfg_path = thr_dir / f"stamp_config_{args.model}.yaml"
-        cfg_path.parent.mkdir(parents=True, exist_ok=True)
-        with cfg_path.open("w") as f:
-            yaml.safe_dump(stamp_cfg, f, sort_keys=False)
+        if args.dry_run:
+            print(f"(dry-run) Would write STAMP config: {cfg_path}")
+        else:
+            cfg_path.parent.mkdir(parents=True, exist_ok=True)
+            with cfg_path.open("w") as f:
+                yaml.safe_dump(stamp_cfg, f, sort_keys=False)
 
         print(f"\n=== Threshold {thr.value} (STAMP crossval) ===")
-        _run(["stamp", "--config", str(cfg_path), "crossval"], env=env, cwd=Path.cwd())
+        _run(
+            ["stamp", "--config", str(cfg_path), "crossval"],
+            dry_run=args.dry_run,
+            env=env,
+            cwd=Path.cwd(),
+        )
 
         print(f"\n=== Threshold {thr.value} (analyze) ===")
         _run(
@@ -300,6 +329,7 @@ def main() -> None:
                 "--out_dir",
                 str(analysis_out_dir),
             ],
+            dry_run=args.dry_run,
             env=env,
             cwd=Path.cwd(),
         )
@@ -318,9 +348,13 @@ def main() -> None:
                 "--out_dir",
                 str(fusion_out_dir),
             ],
+            dry_run=args.dry_run,
             env=env,
             cwd=Path.cwd(),
         )
+
+        if args.dry_run:
+            continue
 
         metrics_csv = fusion_out_dir / "fusion_metrics.csv"
         if not metrics_csv.exists():
@@ -347,10 +381,12 @@ def main() -> None:
 
     results_df = pd.DataFrame(results_rows).sort_values("threshold").reset_index(drop=True)
     out_csv = args.out_dir / "filter_sweep_results.csv"
-    results_df.to_csv(out_csv, index=False)
-    print(f"\nSaved: {out_csv}")
+    if args.dry_run:
+        print(f"\n(dry-run) Would save: {out_csv}")
+    else:
+        results_df.to_csv(out_csv, index=False)
+        print(f"\nSaved: {out_csv}")
 
 
 if __name__ == "__main__":
     main()
-
