@@ -7,6 +7,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from wsi_recurrence.metrics import compute_auc, compute_pr_auc, plot_pr, plot_roc
+from wsi_recurrence.clinical import analysis_defaults, load_project_config
 
 
 def _try_import_lifelines():
@@ -65,21 +66,60 @@ def _plot_km(out_path: Path, time_s: pd.Series, event_s: pd.Series, risk_s: pd.S
     return True
 
 
+def _infer_pred_col(df: pd.DataFrame) -> str:
+    if "pred" in df.columns:
+        return "pred"
+    pred_cols = [c for c in df.columns if str(c).startswith("pred_")]
+    if len(pred_cols) == 1:
+        return pred_cols[0]
+    raise ValueError("Could not infer prediction column (expected 'pred' or a single 'pred_*').")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--fusion_predictions", required=True)
+    ap.add_argument(
+        "--predictions",
+        default="",
+        help="Predictions CSV. Supports WSI-only outputs (e.g. all_predictions_<model>.csv) or fusion_predictions.csv.",
+    )
+    ap.add_argument(
+        "--fusion_predictions",
+        default="",
+        help="Deprecated alias for --predictions (kept for backward compatibility).",
+    )
+    ap.add_argument("--project", default="", help="Optional project YAML for outcome column metadata.")
+    ap.add_argument("--label_col", default="recur", help="Ground-truth label column.")
+    ap.add_argument("--pred_col", default="", help="WSI prediction column (defaults to inferred).")
+    ap.add_argument("--time_col", default="", help="Optional time-to-event column for KM plotting.")
+    ap.add_argument("--event_col", default="", help="Optional event indicator column for KM plotting.")
     ap.add_argument("--out_dir", required=True)
     args = ap.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    fusion_df = pd.read_csv(args.fusion_predictions)
 
-    y_true = fusion_df["recur"].values
-    y_wsi = fusion_df["pred"].values
-    y_fusion = fusion_df["fusion_pred"].values
-    has_clinical = "clinical_pred" in fusion_df.columns
-    y_clin = fusion_df["clinical_pred"].values if has_clinical else None
+    pred_path = (args.predictions or "").strip() or (args.fusion_predictions or "").strip()
+    if not pred_path:
+        raise ValueError("Provide --predictions (or legacy --fusion_predictions).")
+    pred_path = str(pred_path)
+
+    df = pd.read_csv(pred_path)
+
+    label_col = str(args.label_col).strip()
+    if label_col not in df.columns:
+        raise ValueError(f"Missing required label column {label_col!r} in {pred_path}")
+
+    pred_col = str(args.pred_col).strip() or _infer_pred_col(df)
+    if pred_col not in df.columns:
+        raise ValueError(f"Missing prediction column {pred_col!r} in {pred_path}")
+
+    y_true = pd.to_numeric(df[label_col], errors="coerce").values
+    y_wsi = pd.to_numeric(df[pred_col], errors="coerce").values
+
+    has_fusion = "fusion_pred" in df.columns
+    has_clinical = "clinical_pred" in df.columns
+    y_fusion = pd.to_numeric(df["fusion_pred"], errors="coerce").values if has_fusion else None
+    y_clin = pd.to_numeric(df["clinical_pred"], errors="coerce").values if has_clinical else None
 
     # -------------------------
     # ROC comparison
@@ -92,16 +132,12 @@ def main():
         label="WSI"
     )
 
-    plot_roc(
-        ax,
-        y_true,
-        y_fusion,
-        label="Fusion"
-    )
+    if has_fusion:
+        plot_roc(ax, y_true, y_fusion, label="Fusion")
     if has_clinical:
         plot_roc(ax, y_true, y_clin, label="Clinical")
 
-    ax.set_title("ROC: WSI vs Fusion")
+    ax.set_title("ROC comparison")
     ax.legend()
 
     out_path = out_dir / "roc_comparison.png"
@@ -115,10 +151,11 @@ def main():
     # -------------------------
     fig, ax = plt.subplots()
     plot_pr(ax, y_true, y_wsi, label="WSI")
-    plot_pr(ax, y_true, y_fusion, label="Fusion")
+    if has_fusion:
+        plot_pr(ax, y_true, y_fusion, label="Fusion")
     if has_clinical:
         plot_pr(ax, y_true, y_clin, label="Clinical")
-    ax.set_title("PR: WSI vs Fusion")
+    ax.set_title("PR comparison")
     ax.legend()
     pr_path = out_dir / "pr_comparison.png"
     plt.savefig(pr_path, dpi=300, bbox_inches="tight")
@@ -130,11 +167,17 @@ def main():
     # -------------------------
     rows = [
         {"method": "WSI", "roc_auc": float(compute_auc(y_true, y_wsi)), "pr_auc": float(compute_pr_auc(y_true, y_wsi))},
-        {"method": "Fusion", "roc_auc": float(compute_auc(y_true, y_fusion)), "pr_auc": float(compute_pr_auc(y_true, y_fusion))},
     ]
+    if has_fusion:
+        rows.append(
+            {
+                "method": "Fusion",
+                "roc_auc": float(compute_auc(y_true, y_fusion)),
+                "pr_auc": float(compute_pr_auc(y_true, y_fusion)),
+            }
+        )
     if has_clinical:
-        rows.insert(
-            1,
+        rows.append(
             {
                 "method": "Clinical",
                 "roc_auc": float(compute_auc(y_true, y_clin)),
@@ -149,17 +192,30 @@ def main():
     # -------------------------
     # Optional Kaplan-Meier plots
     # -------------------------
-    if "time_to_event" not in fusion_df.columns or "event" not in fusion_df.columns:
-        print("WARNING: time_to_event/event not found; skipping KM plotting.")
+    time_col = str(args.time_col).strip()
+    event_col = str(args.event_col).strip()
+    if (not time_col) or (not event_col):
+        project_path = str(args.project).strip()
+        if project_path:
+            project_cfg = load_project_config(Path(project_path))
+            analysis_cfg = analysis_defaults(project_cfg)
+            time_col = time_col or str(analysis_cfg.get("outcome_time_col") or "").strip()
+            event_col = event_col or str(analysis_cfg.get("outcome_event_col") or "").strip()
+    time_col = time_col or "time_to_event"
+    event_col = event_col or "event"
+
+    if time_col not in df.columns or event_col not in df.columns:
+        print(f"WARNING: {time_col!r}/{event_col!r} not found; skipping KM plotting.")
         return
 
-    time_s = fusion_df["time_to_event"]
-    event_s = fusion_df["event"]
+    time_s = df[time_col]
+    event_s = df[event_col]
 
-    _plot_km(out_dir / "km_wsi.png", time_s, event_s, fusion_df["pred"], title="KM: WSI (median split)")
+    _plot_km(out_dir / "km_wsi.png", time_s, event_s, df[pred_col], title="KM: WSI (median split)")
     if has_clinical:
-        _plot_km(out_dir / "km_clinical.png", time_s, event_s, fusion_df["clinical_pred"], title="KM: Clinical (median split)")
-    _plot_km(out_dir / "km_fusion.png", time_s, event_s, fusion_df["fusion_pred"], title="KM: Fusion (median split)")
+        _plot_km(out_dir / "km_clinical.png", time_s, event_s, df["clinical_pred"], title="KM: Clinical (median split)")
+    if has_fusion:
+        _plot_km(out_dir / "km_fusion.png", time_s, event_s, df["fusion_pred"], title="KM: Fusion (median split)")
 
 
 if __name__ == "__main__":

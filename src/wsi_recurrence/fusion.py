@@ -28,6 +28,10 @@ def evaluate_fusion_groupkfold(
     pred_col: str = "pred",
     stage_col: str = "stage_cont",
     n_splits: int = 5,
+    C: float = 0.01,
+    class_weight: str | None = "balanced",
+    solver: str = "lbfgs",
+    max_iter: int = 5000,
 ) -> FusionResult:
     """
     Grouped 5-fold fusion model: LogisticRegression on [pred, stage_cont] with StandardScaler.
@@ -60,7 +64,15 @@ def evaluate_fusion_groupkfold(
     pipe_fusion = Pipeline(
         [
             ("prep", preprocess_fusion),
-            ("clf", LogisticRegression(C=1.0, solver="lbfgs", max_iter=5000)),
+            (
+                "clf",
+                LogisticRegression(
+                    C=float(C),
+                    class_weight=class_weight,
+                    solver=str(solver),
+                    max_iter=int(max_iter),
+                ),
+            ),
         ]
     )
 
@@ -73,7 +85,15 @@ def evaluate_fusion_groupkfold(
     pipe_clin = Pipeline(
         [
             ("prep", preprocess_clin),
-            ("clf", LogisticRegression(C=1.0, solver="lbfgs", max_iter=5000)),
+            (
+                "clf",
+                LogisticRegression(
+                    C=float(C),
+                    class_weight=class_weight,
+                    solver=str(solver),
+                    max_iter=int(max_iter),
+                ),
+            ),
         ]
     )
 

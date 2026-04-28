@@ -16,6 +16,7 @@ from wsi_recurrence.experiment import (
     dump_yaml,
     load_experiment,
 )
+from wsi_recurrence.clinical import fusion_enabled, validate_fusion_config
 from wsi_recurrence.stamp_runner import (
     find_preprocess_output_dir,
     update_stamp_config_feature_dir,
@@ -117,10 +118,20 @@ def main() -> None:
     dry_run = True if args.dry_run else (not args.execute)
     if args.fusion and not args.analyze:
         raise ValueError("--fusion requires --analyze (fusion needs model predictions from analysis).")
-    if args.plot and not args.fusion:
-        raise ValueError("--plot requires --fusion.")
+    if args.plot and not args.analyze:
+        raise ValueError("--plot requires --analyze.")
 
     spec = load_experiment(args.project, args.experiment)
+    try:
+        run_fusion_cfg = fusion_enabled(spec.config)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    if run_fusion_cfg:
+        validate_fusion_config(spec.config, project_path=args.project)
+    if args.fusion and (not run_fusion_cfg):
+        raise ValueError(
+            f"Project config disables fusion ({args.project}); remove --fusion or set analysis.run_fusion=true."
+        )
     run_dir = create_run_dir(args.out_root, spec.name)
 
     manifest = build_manifest(spec, run_dir)
@@ -152,13 +163,17 @@ def main() -> None:
     else:
         models = all_models
 
-    if args.execute and not args.models.strip():
-        raise ValueError("Refusing to --execute for all models by default. Pass --models.")
     if args.parallel_models and (not args.execute) and (not dry_run):
         raise ValueError("--parallel-models requires --execute (or use --dry-run to preview scheduling).")
 
     header = "Planned STAMP workflow (dry-run):" if dry_run else "Planned STAMP workflow (execute):"
     print(f"\n{header}")
+    if args.models.strip():
+        print(f"Selected models (CLI): {', '.join(models)}")
+    else:
+        print(f"Selected models (experiment config): {', '.join(models)}")
+        if args.execute:
+            print(f"Executing all models from experiment config: {', '.join(models)}")
     clinical_cfg = merged.get("clinical", {}) or {}
     clinical_id_col = clinical_cfg.get("id_col", None)
     clinical_stage_col = clinical_cfg.get("stage_col", None)
@@ -210,14 +225,26 @@ def main() -> None:
         if clinical_stage_col:
             fusion_cmd += ["--clinical_stage_col", str(clinical_stage_col)]
 
-        plot_cmd = [
-            sys.executable,
-            "scripts/plot_results.py",
-            "--fusion_predictions",
-            str(fusion_predictions_csv),
-            "--out_dir",
-            str(figures_out_dir),
-        ]
+        if run_fusion_cfg:
+            plot_cmd = [
+                sys.executable,
+                "scripts/plot_results.py",
+                "--predictions",
+                str(fusion_predictions_csv),
+                "--out_dir",
+                str(figures_out_dir),
+            ]
+        else:
+            plot_cmd = [
+                sys.executable,
+                "scripts/plot_results.py",
+                "--predictions",
+                str(predictions_csv),
+                "--project",
+                str(args.project),
+                "--out_dir",
+                str(figures_out_dir),
+            ]
 
         env = os.environ.copy()
         if gpu_id != "":
@@ -294,19 +321,19 @@ def main() -> None:
             if args.analyze:
                 print(f"{prefix} 5) analyze: {shlex.join(analyze_cmd)}")
                 subprocess.run(analyze_cmd, check=True)
-                if args.fusion:
+                if args.fusion and run_fusion_cfg:
                     print(f"{prefix} 6) fusion: {shlex.join(fusion_cmd)}")
                     subprocess.run(fusion_cmd, check=True)
-                    if args.plot:
-                        print(f"{prefix} 7) plot: {shlex.join(plot_cmd)}")
-                        subprocess.run(plot_cmd, check=True)
+                if args.plot:
+                    print(f"{prefix} 7) plot: {shlex.join(plot_cmd)}")
+                    subprocess.run(plot_cmd, check=True)
         else:
             if args.analyze:
                 print(f"{prefix} 5) analyze: {shlex.join(analyze_cmd)}")
-                if args.fusion:
+                if args.fusion and run_fusion_cfg:
                     print(f"{prefix} 6) fusion: {shlex.join(fusion_cmd)}")
-                    if args.plot:
-                        print(f"{prefix} 7) plot: {shlex.join(plot_cmd)}")
+                if args.plot:
+                    print(f"{prefix} 7) plot: {shlex.join(plot_cmd)}")
 
     if args.parallel_models:
         print(f"\nScheduling {len(models)} model(s) across GPU(s): {', '.join(gpus)}")

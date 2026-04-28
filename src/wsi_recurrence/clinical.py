@@ -17,7 +17,32 @@ def load_project_config(path: Path) -> Dict[str, Any]:
     return data
 
 
+def analysis_defaults(project_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    analysis = project_cfg.get("analysis", {}) or {}
+    if not isinstance(analysis, dict):
+        return {}
+    return analysis
+
+
+def fusion_enabled(project_cfg: Dict[str, Any]) -> bool:
+    """
+    Whether to run clinical fusion for this project.
+    """
+    analysis = analysis_defaults(project_cfg)
+    run_fusion = analysis.get("run_fusion", None)
+    if run_fusion is None:
+        raise ValueError("Project config must explicitly specify analysis.run_fusion: true or false.")
+    if not isinstance(run_fusion, bool):
+        raise ValueError("Project config analysis.run_fusion must be a boolean (true/false).")
+    return run_fusion
+
+
 def clinical_features_table_path(project_cfg: Dict[str, Any]) -> Path:
+    analysis = analysis_defaults(project_cfg)
+    analysis_path = analysis.get("clinical_path", None)
+    if analysis_path:
+        return Path(str(analysis_path))
+
     paths = project_cfg.get("paths", {}) or {}
     path = paths.get("clinical_features_table")
     if path:
@@ -34,6 +59,18 @@ def clinical_defaults(project_cfg: Dict[str, Any]) -> Dict[str, Any]:
         return {}
     return clinical
 
+
+def validate_fusion_config(project_cfg: Dict[str, Any], *, project_path: Path | None = None) -> None:
+    if not fusion_enabled(project_cfg):
+        return
+    try:
+        _ = clinical_features_table_path(project_cfg)
+    except Exception as exc:
+        prefix = f"{project_path}: " if project_path is not None else ""
+        raise ValueError(
+            f"{prefix}Fusion is enabled but no clinical table path is configured. "
+            "Set analysis.run_fusion=false for WSI-only projects, or set analysis.clinical_path / paths.clinical_features_table."
+        ) from exc
 
 def load_clinical_table(path: Path) -> pd.DataFrame:
     return pd.read_csv(path)
@@ -138,11 +175,39 @@ def add_time_to_event_event_columns(
     df[out_time_col] = (foll - surg).dt.days
 
     raw_event = df[event_col]
-    df[out_event_col] = (raw_event == event_positive_value).astype(int)
+    raw = raw_event.astype("string")
+    raw_norm = raw.str.strip().str.lower()
+    pos = str(event_positive_value).strip().lower()
+
+    raw_num = pd.to_numeric(raw, errors="coerce")
+    try:
+        pos_num = float(event_positive_value)
+    except Exception:
+        pos_num = None
+
+    mask = raw_norm.eq(pos)
+    if pos_num is not None:
+        mask = mask | (raw_num == pos_num)
+
+    # Preserve missing values as NA (do not coerce NA to 0).
+    event = pd.Series(pd.NA, index=df.index, dtype="Int64")
+    notna = raw_event.notna()
+    event.loc[notna] = mask.loc[notna].astype(int)
+
+    # Debug logging
+    try:
+        print("Event raw value counts (top 10):")
+        print(raw_norm.value_counts(dropna=False).head(10).to_string())
+        print("Derived event value counts:")
+        print(event.value_counts(dropna=False).to_string())
+    except Exception:
+        pass
 
     if label_fallback_col in df.columns:
         # Only fill where event could not be computed due to missing raw values.
-        df[out_event_col] = df[out_event_col].where(raw_event.notna(), pd.to_numeric(df[label_fallback_col], errors="coerce"))
+        event = event.where(raw_event.notna(), pd.to_numeric(df[label_fallback_col], errors="coerce"))
+
+    df[out_event_col] = event
 
     df[out_time_col] = pd.to_numeric(df[out_time_col], errors="coerce")
     df[out_event_col] = pd.to_numeric(df[out_event_col], errors="coerce")

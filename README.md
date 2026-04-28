@@ -33,11 +33,14 @@ Key fields under `clinical:`:
 Dry-run (prints commands only):
 - `python scripts/run_experiment.py --dry-run --models ctranspath --analyze --fusion --plot`
 
-One-model execute:
+Execute (runs all models in the experiment config by default):
+- `python scripts/run_experiment.py --execute --analyze --fusion --plot`
+
+Execute a subset of models:
 - `python scripts/run_experiment.py --execute --models ctranspath --analyze --fusion --plot`
 
 Notes:
-- `--execute` is intentionally gated behind `--models` to avoid launching all models accidentally.
+- Default model selection is all models listed in the experiment YAML; use `--models a,b,c` to restrict.
 - Preprocess control:
   - default: preprocess only if no hash-named output dir is detected
   - `--run-preprocess`: always preprocess

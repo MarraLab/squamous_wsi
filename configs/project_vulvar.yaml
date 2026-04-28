@@ -1,0 +1,40 @@
+project:
+  name: vulvar
+
+analysis:
+  run_fusion: false
+  clinical_path: null
+  clinical_features: []
+  outcome_time_col: null
+  outcome_event_col: null
+
+paths:
+  # Update these to your cohort.
+  project_dir: /projects/marralab/rcorbett_prj/vulvar
+  wsi_dir: /projects/marralab/rcorbett_prj/vulvar/merged
+  cache_dir: /tmp/image_cache/vulvar
+
+  # Minimal STAMP slide/label table (required by STAMP preprocess/crossval).
+  # Should include at least patient/filename/label columns used by your experiment.
+  stamp_table: /projects/marralab/rcorbett_prj/vulvar/merged/vulvar.csv
+
+columns:
+  pred_id: case_id
+  label: risk
+
+outputs:
+  preprocess_base: stamp_preprocess
+  crossval_base: stamp_crossval
+  analysis_output: stamp_analysis
+
+stamp:
+  device: cuda
+  max_workers: 16
+
+crossval:
+  task: classification
+  ground_truth_label: risk
+  patient_label: case_id
+  filename_label: filename
+  n_splits: 5
+

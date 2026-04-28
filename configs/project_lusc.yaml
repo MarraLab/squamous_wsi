@@ -1,6 +1,13 @@
 project:
   name: lusc
 
+analysis:
+  run_fusion: true
+  clinical_path: null
+  clinical_features: []
+  outcome_time_col: null
+  outcome_event_col: null
+
 paths:
   project_dir: /projects/marralab/rcorbett_prj/LUSC
   wsi_dir: /projects/marralab/rcorbett_prj/LUSC

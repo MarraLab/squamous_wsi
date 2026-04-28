@@ -9,10 +9,12 @@ import pandas as pd
 from wsi_recurrence.clinical import (
     add_time_to_event_event_columns,
     clinical_features_table_path,
+    fusion_enabled,
     infer_merge_columns,
     load_clinical_table,
     load_project_config,
     merge_predictions_with_clinical,
+    validate_fusion_config,
 )
 from wsi_recurrence.fusion import evaluate_fusion_groupkfold
 
@@ -40,6 +42,13 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--date_followup_col", type=str, default="")
     ap.add_argument("--event_col", type=str, default="")
     ap.add_argument("--n_splits", type=int, default=5)
+    ap.add_argument("--C", type=float, default=0.01)
+    ap.add_argument(
+        "--class_weight",
+        type=str,
+        default="balanced",
+        help='LogisticRegression class_weight ("balanced" or "none").',
+    )
     return ap.parse_args()
 
 
@@ -47,7 +56,27 @@ def main() -> None:
     args = parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
+    cw_raw = str(args.class_weight).strip().lower()
+    if cw_raw in ("", "none", "null"):
+        class_weight = None
+    elif cw_raw == "balanced":
+        class_weight = "balanced"
+    else:
+        raise ValueError('Invalid --class_weight (expected "balanced" or "none").')
+
+    print(f"Using LogisticRegression(C={args.C}, class_weight={class_weight})")
+
     project_cfg = load_project_config(args.project)
+    try:
+        run_fusion = fusion_enabled(project_cfg)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    if not run_fusion:
+        raise SystemExit(
+            f"Fusion disabled in project config ({args.project}). "
+            "Set analysis.run_fusion=true (and configure clinical_path / paths.clinical_features_table) to run fusion."
+        )
+    validate_fusion_config(project_cfg, project_path=args.project)
     clin_path = clinical_features_table_path(project_cfg)
     defaults = project_cfg.get("clinical", {}) or {}
 
@@ -93,6 +122,10 @@ def main() -> None:
         pred_col="pred",
         stage_col="stage_cont",
         n_splits=args.n_splits,
+        C=args.C,
+        class_weight=class_weight,
+        solver="lbfgs",
+        max_iter=5000,
     )
 
     # Optionally drop rows with missing time/event for KM use, without affecting model fit.
