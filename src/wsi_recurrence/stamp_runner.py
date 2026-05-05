@@ -6,6 +6,70 @@ from typing import Any, Dict, List
 import yaml
 
 
+_DEFAULT_ADVANCED_CONFIG: Dict[str, Any] = {
+    "seed": 42,
+    "max_epochs": 32,
+    "patience": 16,
+    "batch_size": 64,
+    "bag_size": 512,
+    "max_lr": 1e-4,
+    "div_factor": 25.0,
+    "model_name": "vit",
+    "model_params": {
+        "vit": {
+            "dim_model": 512,
+            "dim_feedforward": 512,
+            "n_heads": 8,
+            "n_layers": 2,
+            "dropout": 0.25,
+            "use_alibi": False,
+        }
+    },
+}
+
+
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(base)
+    for key, value in override.items():
+        if key in out and isinstance(out[key], dict) and isinstance(value, dict):
+            out[key] = _deep_merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+def _resolve_advanced_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Return a valid `advanced_config` dict.
+
+    Behavior:
+      - Start from defaults required by STAMP's pydantic schema.
+      - If cfg contains `advanced_config`, deep-merge it over defaults.
+      - This allows experiment YAML overrides without replacing required fields.
+    """
+    raw = cfg.get("advanced_config", None)
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise ValueError("advanced_config must be a mapping (YAML dict) when provided.")
+    return _deep_merge(_DEFAULT_ADVANCED_CONFIG, raw)
+
+
+def _validate_advanced_config(advanced: Dict[str, Any], *, context: str) -> None:
+    if not isinstance(advanced, dict):
+        raise ValueError(f"{context}: advanced_config must be a mapping (YAML dict).")
+    if "model_params" not in advanced or not isinstance(advanced.get("model_params"), dict):
+        raise ValueError(f"{context}: advanced_config.model_params is required and must be a mapping.")
+    if "model_name" not in advanced or not str(advanced.get("model_name", "")).strip():
+        raise ValueError(f"{context}: advanced_config.model_name is required.")
+    model_name = str(advanced["model_name"]).strip()
+    if model_name not in advanced["model_params"]:
+        raise ValueError(
+            f"{context}: advanced_config.model_name={model_name!r} must be a key in advanced_config.model_params "
+            f"(available: {sorted(advanced['model_params'].keys())})."
+        )
+
+
 def _dump_yaml(obj: Dict[str, Any], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as f:
@@ -45,7 +109,8 @@ def build_stamp_config(cfg: Dict[str, Any], model_name: str, *, run_dir: Path) -
     outputs = cfg.get("outputs", {})
     stamp = cfg.get("stamp", {})
     crossval = cfg.get("crossval", {})
-    advanced = cfg.get("advanced_config", {})
+    advanced = _resolve_advanced_config(cfg)
+    _validate_advanced_config(advanced, context=f"{model_name}: STAMP config generation")
 
     project_dir = Path(str(paths["project_dir"]))
     wsi_dir = Path(str(paths.get("wsi_dir", project_dir)))

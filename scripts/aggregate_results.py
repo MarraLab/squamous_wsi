@@ -9,6 +9,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from wsi_recurrence.clinical import fusion_enabled, load_project_config
+from wsi_recurrence.validation import validate_predictions_complete
 
 
 METHOD_ORDER = ["WSI", "Clinical", "Fusion"]
@@ -169,9 +170,26 @@ def main() -> None:
     analysis_dir = run_dir / "analysis"
     primary_metric = args.primary_metric.strip() or _default_primary_metric(args.project)
 
+    project_cfg = None
+    if args.project is not None:
+        project_cfg = load_project_config(args.project)
+
     model_dirs = _find_model_dirs(analysis_dir)
     if not model_dirs:
         raise RuntimeError(f"No model dirs found under: {analysis_dir}")
+
+    if project_cfg is not None and (project_cfg.get("validation", None) is not None):
+        for model_dir in model_dirs:
+            pred_csv = model_dir / f"all_predictions_{model_dir.name}.csv"
+            if not pred_csv.exists():
+                print(f"WARNING: validation enabled but missing predictions CSV: {pred_csv}")
+                continue
+            try:
+                _ = validate_predictions_complete(pred_csv, project_cfg)
+            except Exception as exc:
+                raise SystemExit(
+                    f"Prediction completeness check failed for model={model_dir.name} ({pred_csv}):\n{exc}"
+                ) from exc
 
     rows: list[pd.DataFrame] = []
     for model_dir in model_dirs:

@@ -79,23 +79,45 @@ def load_clinical_table(path: Path) -> pd.DataFrame:
 def infer_merge_columns(
     clinical_df: pd.DataFrame,
     *,
+    project_cfg: Dict[str, Any] | None = None,
+    pred_id_col: str | None = None,
     clinical_id_col: str | None = None,
     clinical_stage_col: str | None = None,
 ) -> Tuple[str, str]:
+    """
+    Infer merge columns for clinical fusion.
+
+    Returns (clinical_id_col, clinical_stage_col).
+
+    - clinical_id_col is required for merging.
+    - clinical_stage_col is optional and kept for backward compatibility; it may be "".
+    """
+    if clinical_id_col is None and project_cfg is not None:
+        clinical_id_col = str((project_cfg.get("clinical", {}) or {}).get("id_col") or "").strip() or None
+
+    if clinical_id_col is None and pred_id_col:
+        if pred_id_col in clinical_df.columns:
+            clinical_id_col = pred_id_col
+
     if clinical_id_col is None:
         for cand in ("slide_id", "patient", "final scan name"):
             if cand in clinical_df.columns:
                 clinical_id_col = cand
                 break
+
+    if clinical_stage_col is None and project_cfg is not None:
+        clinical_stage_col = str((project_cfg.get("clinical", {}) or {}).get("stage_col") or "").strip() or None
+
     if clinical_stage_col is None:
         for cand in ("stage_cont", "stage"):
             if cand in clinical_df.columns:
                 clinical_stage_col = cand
                 break
+
     if clinical_id_col is None:
         raise ValueError("Could not infer clinical id column; pass via config/CLI.")
     if clinical_stage_col is None:
-        raise ValueError("Could not infer clinical stage column; pass via config/CLI.")
+        clinical_stage_col = ""
     return clinical_id_col, clinical_stage_col
 
 
@@ -107,7 +129,8 @@ def merge_predictions_with_clinical(
     pred_col: str,
     label_col: str,
     clinical_id_col: str,
-    clinical_stage_col: str,
+    clinical_features: list[str] | None = None,
+    clinical_stage_col: str = "",
     extra_cols: list[str] | None = None,
 ) -> pd.DataFrame:
     missing = [c for c in (pred_id_col, pred_col, label_col) if c not in pred_df.columns]
@@ -117,6 +140,18 @@ def merge_predictions_with_clinical(
     clin = clinical_df.copy()
     pred = pred_df.copy()
 
+    if clinical_features is None:
+        clinical_features = []
+    clinical_features = [str(c) for c in clinical_features if str(c).strip()]
+
+    if clinical_stage_col and ("stage_cont" not in clinical_features):
+        # Preserve legacy behavior if callers still pass a stage column separately.
+        clinical_features = [*clinical_features, "stage_cont"]
+
+    missing_features = [c for c in clinical_features if c not in clin.columns]
+    if missing_features:
+        raise ValueError(f"Clinical feature(s) missing from clinical table: {', '.join(missing_features)}")
+
     # Keep core fusion columns plus optional extra columns if present (e.g. dates/event for KM).
     if extra_cols is None:
         extra_cols = [
@@ -124,17 +159,21 @@ def merge_predictions_with_clinical(
             "date of recurrence or most recent followup",
             "recurrence (1=yes)",
         ]
-    keep_cols = [clinical_id_col, clinical_stage_col] + [c for c in extra_cols if c in clin.columns]
+    keep_cols = [clinical_id_col] + clinical_features + [c for c in extra_cols if c in clin.columns]
     clin = clin[keep_cols].copy()
 
-    clin = clin.rename(columns={clinical_id_col: pred_id_col, clinical_stage_col: "stage_cont"})
+    rename_map = {clinical_id_col: pred_id_col}
+    if clinical_stage_col:
+        rename_map[str(clinical_stage_col)] = "stage_cont"
+    clin = clin.rename(columns=rename_map)
     pred = pred.rename(columns={pred_col: "pred"})
 
     merged = pred.merge(clin, on=pred_id_col, how="left")
 
-    merged["stage_cont"] = pd.to_numeric(merged["stage_cont"], errors="coerce")
     merged["pred"] = pd.to_numeric(merged["pred"], errors="coerce")
     merged[label_col] = pd.to_numeric(merged[label_col], errors="coerce")
+    if "stage_cont" in merged.columns:
+        merged["stage_cont"] = pd.to_numeric(merged["stage_cont"], errors="coerce")
 
     return merged
 

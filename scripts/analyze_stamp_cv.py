@@ -6,23 +6,27 @@ Examples:
   python analyze_stamp_cv.py --cv_root /projects/.../stamp_crossval/virchow-full/cv_low_mid_high --model_name virchow-full
   python analyze_stamp_cv.py --cv_root /projects/.../stamp_crossval/virchow-full --cv_tag cv_low_mid_high --model_name virchow-full
   python analyze_stamp_cv.py --cv_map /projects/.../stamp_analysis/sweep_auc_summary.csv
+
+Config-driven label/patient/probability columns:
+  python analyze_stamp_cv.py --project configs/project_vulvar.yaml --cv_root /projects/... --model_name ctranspath
 """
 from __future__ import annotations
 
 import argparse
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import average_precision_score, roc_auc_score, roc_curve
 
 import sys
 
-from wsi_recurrence.stamp_io import load_patient_predictions, resolve_cv_dir
+from wsi_recurrence.clinical import load_project_config
+from wsi_recurrence.stamp_io import resolve_cv_dir
 from wsi_recurrence.metrics import plot_roc
 
 sns.set_style("whitegrid")
@@ -48,8 +52,84 @@ def _resolve_cv_dir(cv_root: Path, cv_tag: Optional[str]) -> Path:
     return resolve_cv_dir(cv_root, cv_tag)
 
 
-def load_model_predictions(cv_dir: Path) -> pd.DataFrame:
-    return load_patient_predictions(cv_dir)
+def _is_prob_series(series: pd.Series) -> bool:
+    vals = pd.to_numeric(series, errors="coerce")
+    vals = vals.dropna()
+    if vals.empty:
+        return False
+    if not np.isfinite(vals.to_numpy()).all():
+        return False
+    return bool(((0.0 <= vals) & (vals <= 1.0)).all())
+
+
+def _infer_prob_col(df: pd.DataFrame, *, label_col: str, explicit_prob_col: str | None) -> str:
+    if explicit_prob_col:
+        if explicit_prob_col not in df.columns:
+            raise ValueError(
+                f"Requested prob_col {explicit_prob_col!r} not found in fold CSV; available columns: {sorted(df.columns)}"
+            )
+        return explicit_prob_col
+
+    default_prob = f"{label_col}_1"
+    if default_prob in df.columns:
+        return default_prob
+
+    if "pred" in df.columns and _is_prob_series(df["pred"]):
+        return "pred"
+
+    raise ValueError(
+        "Could not infer probability column for ROC/PR. "
+        f"Tried explicit --prob_col, then {default_prob!r}, then numeric 'pred' in [0,1]. "
+        f"Available columns: {sorted(df.columns)}"
+    )
+
+
+def _load_fold_predictions(
+    csv_path: Path,
+    *,
+    patient_col: str,
+    label_col: str,
+    prob_col: str | None,
+) -> pd.DataFrame:
+    df = pd.read_csv(csv_path)
+    missing = [c for c in (patient_col, label_col) if c not in df.columns]
+    if missing:
+        raise ValueError(f"{csv_path}: missing required column(s): {missing}. Available: {sorted(df.columns)}")
+
+    chosen_prob_col = _infer_prob_col(df, label_col=label_col, explicit_prob_col=prob_col)
+
+    out = df[[patient_col, label_col, chosen_prob_col]].copy()
+    out = out.rename(columns={patient_col: "patient", chosen_prob_col: "pred"})
+    out[label_col] = pd.to_numeric(out[label_col], errors="coerce")
+    out["pred"] = pd.to_numeric(out["pred"], errors="coerce")
+    return out
+
+
+def load_model_predictions(
+    cv_dir: Path,
+    *,
+    patient_col: str,
+    label_col: str,
+    prob_col: str | None,
+) -> pd.DataFrame:
+    all_preds: list[pd.DataFrame] = []
+    split_dirs = sorted(cv_dir.glob("split-*"))
+    for split_dir in split_dirs:
+        pred_file = split_dir / "patient-preds.csv"
+        if not pred_file.exists():
+            continue
+        fold = _load_fold_predictions(
+            pred_file,
+            patient_col=patient_col,
+            label_col=label_col,
+            prob_col=prob_col,
+        )
+        fold["split"] = int(split_dir.name.split("-")[-1])
+        all_preds.append(fold)
+
+    if not all_preds:
+        return pd.DataFrame()
+    return pd.concat(all_preds, ignore_index=True)
 
 
 def _infer_model_name(row: pd.Series) -> str:
@@ -99,6 +179,20 @@ def main() -> None:
     ap.add_argument("--model_name", type=str, default=None)
     ap.add_argument("--cv_map", type=Path, default=None)
     ap.add_argument(
+        "--project",
+        type=Path,
+        default=None,
+        help="Optional project YAML (e.g. configs/project_vulvar.yaml) to infer label/patient columns.",
+    )
+    ap.add_argument("--label_col", type=str, default="", help="Ground-truth label column (overrides config inference).")
+    ap.add_argument("--patient_col", type=str, default="", help="Patient/id column in fold CSVs (overrides config inference).")
+    ap.add_argument(
+        "--prob_col",
+        type=str,
+        default="",
+        help="Positive-class probability column in fold CSVs (overrides inference).",
+    )
+    ap.add_argument(
         "--out_dir",
         type=Path,
         default=None,
@@ -119,6 +213,34 @@ def main() -> None:
     base_out_dir = args.out_dir if args.out_dir is not None else _infer_out_dir(entries[0][1])
     base_out_dir.mkdir(parents=True, exist_ok=True)
 
+    project_cfg: Mapping[str, Any] | None = None
+    if args.project is not None:
+        project_cfg = load_project_config(args.project)
+
+    # -------------------------
+    # Config-driven defaults (CLI may override)
+    # -------------------------
+    if project_cfg is not None:
+        columns_cfg = (project_cfg.get("columns", {}) or {}) if isinstance(project_cfg, Mapping) else {}
+        crossval_cfg = (project_cfg.get("crossval", {}) or {}) if isinstance(project_cfg, Mapping) else {}
+        default_label_col = str(columns_cfg.get("label") or "").strip() or str(crossval_cfg.get("ground_truth_label") or "").strip()
+        default_patient_col = str(columns_cfg.get("pred_id") or "").strip() or str(crossval_cfg.get("patient_label") or "").strip()
+        if not default_label_col:
+            raise SystemExit(
+                "Could not infer label_col from project config; pass --label_col or set columns.label / crossval.ground_truth_label."
+            )
+        if not default_patient_col:
+            raise SystemExit(
+                "Could not infer patient_col from project config; pass --patient_col or set columns.pred_id / crossval.patient_label."
+            )
+    else:
+        default_label_col = "recur"
+        default_patient_col = "patient"
+
+    label_col = args.label_col.strip() or default_label_col
+    patient_col = args.patient_col.strip() or default_patient_col
+    prob_col = args.prob_col.strip() or None
+
     all_results: Dict[str, pd.DataFrame] = {}
     for model_name, cv_root in entries:
         try:
@@ -126,7 +248,24 @@ def main() -> None:
         except Exception as exc:
             logger.error("%s: %s", model_name, exc)
             continue
-        results_df = load_model_predictions(cv_dir)
+        try:
+            results_df = load_model_predictions(
+                cv_dir,
+                patient_col=patient_col,
+                label_col=label_col,
+                prob_col=prob_col,
+            )
+        except Exception as exc:
+            logger.error(
+                "%s: failed to load predictions under %s (patient_col=%s label_col=%s prob_col=%s): %s",
+                model_name,
+                cv_dir,
+                patient_col,
+                label_col,
+                prob_col or f"{label_col}_1",
+                exc,
+            )
+            continue
         if results_df.empty:
             logger.warning("%s: no predictions found under %s", model_name, cv_dir)
             continue
@@ -134,31 +273,67 @@ def main() -> None:
         logger.info("%s: %d predictions loaded from %s", model_name, len(results_df), cv_dir)
 
     if not all_results:
-        raise RuntimeError("No predictions loaded. Check cv paths and files.")
+        example_model = entries[0][0] if entries else "<model>"
+        example_root = str(entries[0][1]) if entries else "<cv_root>"
+        raise RuntimeError(
+            "No valid prediction files found. "
+            f"Example: No valid prediction files found for model {example_model} under {example_root}. "
+            f"Checked for patient_col={patient_col!r}, label_col={label_col!r}, "
+            f"and probability column={prob_col or f'{label_col}_1'!r}."
+        )
 
     # AUC summary
     auc_results = []
     for model_name, predictions_df in all_results.items():
-        if "recur" in predictions_df.columns and "pred" in predictions_df.columns:
-            auc_score = roc_auc_score(predictions_df["recur"], predictions_df["pred"])
-            auc_results.append({
-                "Model": model_name,
-                "AUC": f"{auc_score:.4f}",
-                "N Samples": len(predictions_df),
-                "N Positive": predictions_df["recur"].sum(),
-            })
-            logger.info("%s AUC = %.4f", model_name, auc_score)
-        else:
-            logger.warning("%s missing recur/pred columns", model_name)
+        if ("patient" not in predictions_df.columns) or (label_col not in predictions_df.columns) or ("pred" not in predictions_df.columns):
+            logger.warning("%s missing required columns for metrics", model_name)
+            continue
 
-    auc_table = pd.DataFrame(auc_results).sort_values("AUC", ascending=False)
+        y_true = pd.to_numeric(predictions_df[label_col], errors="coerce")
+        y_pred = pd.to_numeric(predictions_df["pred"], errors="coerce")
+        keep = y_true.notna() & y_pred.notna()
+        y_true = y_true[keep].astype(int)
+        y_pred = y_pred[keep].astype(float)
+
+        n_patients = int(predictions_df["patient"].astype("string").nunique(dropna=True))
+        n_positive = int((y_true == 1).sum())
+        n_negative = int((y_true == 0).sum())
+
+        roc_auc = float("nan")
+        pr_auc = float("nan")
+        if n_positive > 0 and n_negative > 0:
+            roc_auc = float(roc_auc_score(y_true, y_pred))
+            pr_auc = float(average_precision_score(y_true, y_pred))
+            logger.info("%s ROC AUC = %.4f | PR AUC = %.4f", model_name, roc_auc, pr_auc)
+        else:
+            logger.warning("%s: cannot compute AUC (need both classes). n_positive=%d n_negative=%d", model_name, n_positive, n_negative)
+
+        auc_results.append(
+            {
+                "model": model_name,
+                "roc_auc": roc_auc,
+                "pr_auc": pr_auc,
+                "n_patients": n_patients,
+                "n_positive": n_positive,
+                "n_negative": n_negative,
+            }
+        )
+
+    if not auc_results:
+        raise RuntimeError(
+            "No valid model results found for AUC summary. "
+            f"Checked for patient_col={patient_col!r}, label_col={label_col!r}, "
+            f"and probability column={prob_col or f'{label_col}_1'!r}."
+        )
+
+    auc_table = pd.DataFrame(auc_results).sort_values("roc_auc", ascending=False, na_position="last")
     auc_path = base_out_dir / f"auc_summary_{run_name}.csv"
     auc_table.to_csv(auc_path, index=False)
     logger.info("Saved AUC summary to %s", auc_path)
 
     # Combined predictions
     first_model = list(all_results.keys())[0]
-    combined_df = all_results[first_model][["patient", "recur", "pred"]].copy()
+    combined_df = all_results[first_model][["patient", label_col, "pred"]].copy()
     combined_df = combined_df.rename(columns={"pred": f"pred_{first_model}"})
 
     for model_name in list(all_results.keys())[1:]:
@@ -182,7 +357,7 @@ def main() -> None:
 
     for idx, (model_name, predictions_df) in enumerate(all_results.items()):
         ax = axes[idx]
-        y_true = predictions_df["recur"].values
+        y_true = predictions_df[label_col].values
         y_pred = predictions_df["pred"].values
 
         plot_roc(ax, y_true, y_pred, label=model_name)

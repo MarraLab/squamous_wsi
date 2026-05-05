@@ -19,6 +19,7 @@ from wsi_recurrence.clinical import fusion_enabled, validate_fusion_config
 from wsi_recurrence.experiment import load_experiment
 from wsi_recurrence.metrics import compute_auc, compute_pr_auc
 from wsi_recurrence.stamp_runner import build_stamp_config, find_preprocess_output_dir
+from wsi_recurrence.validation import validate_predictions_complete
 
 
 _WORKER_MODEL = None
@@ -534,6 +535,19 @@ def main() -> None:
 
         predictions_csv = analysis_out_dir / f"all_predictions_{args.model}.csv"
 
+        cohort_stats = None
+        if not args.dry_run:
+            try:
+                cohort_stats = validate_predictions_complete(predictions_csv, cfg)
+            except Exception as exc:
+                threshold_label = "raw" if thr.is_raw else str(thr.value)
+                msg = (
+                    f"Threshold run failed validation (threshold={threshold_label}) for predictions CSV:\n"
+                    f"  {predictions_csv}\n"
+                    f"{exc}"
+                )
+                raise SystemExit(msg) from exc
+
         if run_fusion:
             print(f"\n=== bad_prob_threshold {label} (fusion) ===")
             _run(
@@ -584,6 +598,9 @@ def main() -> None:
             {
                 "threshold": threshold_label,
                 "bad_prob_threshold": bad_prob_threshold_num,
+                "n_patients": int(cohort_stats.n_patients) if cohort_stats is not None else float("nan"),
+                "n_positive": int(cohort_stats.n_positive) if cohort_stats is not None else float("nan"),
+                "n_negative": int(cohort_stats.n_negative) if cohort_stats is not None else float("nan"),
                 "wsi_auc": wsi_auc,
                 "wsi_pr_auc": wsi_pr_auc,
                 "fusion_auc": fusion_auc,

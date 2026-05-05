@@ -22,6 +22,7 @@ from wsi_recurrence.stamp_runner import (
     update_stamp_config_feature_dir,
     write_stamp_configs,
 )
+from wsi_recurrence.validation import validate_predictions_complete
 
 
 def _as_path(value) -> Path:
@@ -96,6 +97,25 @@ def parse_args() -> argparse.Namespace:
         help="Never run STAMP preprocess; require an existing detected feature_dir.",
     )
     ap.add_argument(
+        "--skip-crossval",
+        action="store_true",
+        help="Do not run STAMP crossval; require existing crossval outputs under the chosen cv_root.",
+    )
+    ap.add_argument(
+        "--reuse-existing",
+        action="store_true",
+        help="Shorthand for --skip-preprocess and --skip-crossval (reuse existing STAMP outputs).",
+    )
+    ap.add_argument(
+        "--existing-run-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Existing STAMP crossval run directory containing per-model folders. "
+            "When set, inferred per-model cv_root is <existing-run-dir>/<model_name>."
+        ),
+    )
+    ap.add_argument(
         "--analyze",
         action="store_true",
         help="After crossval, run analyze_stamp_cv.py into the run's analysis folder.",
@@ -116,6 +136,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     dry_run = True if args.dry_run else (not args.execute)
+    if args.reuse_existing:
+        args.skip_preprocess = True
+        args.skip_crossval = True
+    if args.existing_run_dir is not None and (not args.skip_crossval):
+        raise ValueError("--existing-run-dir is only supported with --skip-crossval/--reuse-existing.")
     if args.fusion and not args.analyze:
         raise ValueError("--fusion requires --analyze (fusion needs model predictions from analysis).")
     if args.plot and not args.analyze:
@@ -196,11 +221,14 @@ def main() -> None:
         crossval_cmd = ["stamp", "--config", str(cfg_path), "crossval"]
         crossval_out_dir = crossval_runs_base / model_name
         analysis_out_dir = run_dir / "analysis" / model_name
+        cv_root = (args.existing_run_dir / model_name) if args.existing_run_dir is not None else crossval_out_dir
         analyze_cmd = [
             sys.executable,
             "scripts/analyze_stamp_cv.py",
+            "--project",
+            str(args.project),
             "--cv_root",
-            str(crossval_out_dir),
+            str(cv_root),
             "--model_name",
             str(model_name),
             "--out_dir",
@@ -253,6 +281,44 @@ def main() -> None:
         print(f"\n{prefix}")
         print(f"{prefix} 1) preprocess: {shlex.join(preprocess_cmd)}")
         print(f"{prefix}    crossval.output_dir: {crossval_out_dir}")
+        if args.skip_crossval:
+            print(f"{prefix}    crossval decision: SKIP (flag set)")
+        if args.existing_run_dir is not None:
+            print(f"{prefix}    existing cv_root: {cv_root}")
+
+        if args.skip_crossval:
+            if not cv_root.exists():
+                raise SystemExit(f"Requested --skip-crossval but CV root not found for model {model_name}: {cv_root}")
+            if args.skip_preprocess:
+                print(f"{prefix}    preprocess decision: SKIP (flag set)")
+            elif args.run_preprocess:
+                print(f"{prefix}    preprocess decision: SKIP (crossval skipped; preprocess not needed)")
+            else:
+                print(f"{prefix}    preprocess decision: SKIP (crossval skipped; preprocess not needed)")
+            if args.analyze:
+                print(f"{prefix} 5) analyze: {shlex.join(analyze_cmd)}")
+                if not dry_run:
+                    analysis_out_dir.mkdir(parents=True, exist_ok=True)
+                    subprocess.run(analyze_cmd, check=True)
+                    try:
+                        _ = validate_predictions_complete(predictions_csv, merged)
+                    except Exception as exc:
+                        raise SystemExit(
+                            f"{prefix} Prediction completeness check failed for {predictions_csv}:\n{exc}"
+                        ) from exc
+                if args.fusion and run_fusion_cfg:
+                    print(f"{prefix} 6) fusion: {shlex.join(fusion_cmd)}")
+                    if not dry_run:
+                        fusion_out_dir.mkdir(parents=True, exist_ok=True)
+                        subprocess.run(fusion_cmd, check=True)
+                if args.plot:
+                    print(f"{prefix} 7) plot: {shlex.join(plot_cmd)}")
+                    if not dry_run:
+                        figures_out_dir.mkdir(parents=True, exist_ok=True)
+                        subprocess.run(plot_cmd, check=True)
+            else:
+                print(f"{prefix} analyze/fusion/plot: (not requested)")
+            return
 
         preprocess_out = find_preprocess_output_dir(model_name, preprocess_base)
         detected_str = str(preprocess_out) if preprocess_out is not None else "(none yet)"
@@ -321,6 +387,12 @@ def main() -> None:
             if args.analyze:
                 print(f"{prefix} 5) analyze: {shlex.join(analyze_cmd)}")
                 subprocess.run(analyze_cmd, check=True)
+                try:
+                    _ = validate_predictions_complete(predictions_csv, merged)
+                except Exception as exc:
+                    raise SystemExit(
+                        f"{prefix} Prediction completeness check failed for {predictions_csv}:\n{exc}"
+                    ) from exc
                 if args.fusion and run_fusion_cfg:
                     print(f"{prefix} 6) fusion: {shlex.join(fusion_cmd)}")
                     subprocess.run(fusion_cmd, check=True)
