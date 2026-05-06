@@ -91,6 +91,7 @@ def build_manifest(spec: ExperimentSpec, run_dir: Path) -> Dict[str, Any]:
         "crossval": spec.config.get("crossval", {}),
         "advanced_config": spec.config.get("advanced_config", {}),
         "tile_filter": spec.config.get("tile_filter", {}),
+        "slide_encoding": spec.config.get("slide_encoding", {}),
         "models": spec.models(),
         "provenance": {
             "project_yaml": str(spec.project_path),
@@ -98,4 +99,3 @@ def build_manifest(spec: ExperimentSpec, run_dir: Path) -> Dict[str, Any]:
             "run_dir": str(run_dir),
         },
     }
-

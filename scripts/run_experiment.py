@@ -18,11 +18,16 @@ from wsi_recurrence.experiment import (
 )
 from wsi_recurrence.clinical import fusion_enabled, validate_fusion_config
 from wsi_recurrence.stamp_runner import (
+    build_stamp_config,
     find_preprocess_output_dir,
+    find_slide_encoding_output_dir,
+    slide_encoding_output_dir,
     update_stamp_config_feature_dir,
+    update_stamp_config_slide_encoding,
     write_stamp_configs,
 )
 from wsi_recurrence.validation import validate_predictions_complete
+from wsi_recurrence.slide_encoding import parse_slide_encoding_config, validate_slide_encoding_pairing
 
 
 def _as_path(value) -> Path:
@@ -106,6 +111,17 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Shorthand for --skip-preprocess and --skip-crossval (reuse existing STAMP outputs).",
     )
+    se = ap.add_mutually_exclusive_group()
+    se.add_argument(
+        "--skip-slide-encoding",
+        action="store_true",
+        help="Do not run STAMP encode_slides; require an existing detected slide-level feature_dir.",
+    )
+    se.add_argument(
+        "--reuse-slide-encoding",
+        action="store_true",
+        help="If slide-encoding output is detected, skip encode_slides; otherwise run it.",
+    )
     ap.add_argument(
         "--existing-run-dir",
         type=Path,
@@ -167,6 +183,12 @@ def main() -> None:
     print(f"Manifest: {run_dir / 'manifest.yaml'}")
 
     merged = spec.config
+    se_cfg = parse_slide_encoding_config(merged)
+    if se_cfg is not None and se_cfg.enabled:
+        try:
+            validate_slide_encoding_pairing(se_cfg)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
     project_dir = _as_path(merged["paths"]["project_dir"])
     preprocess_base = _under_project(project_dir, merged.get("outputs", {}).get("preprocess_base", "stamp_preprocess"))
     crossval_runs_base = project_dir / "stamp_crossval_runs" / run_dir.name
@@ -218,6 +240,7 @@ def main() -> None:
 
         cfg_path = config_paths[model_name]
         preprocess_cmd = ["stamp", "--config", str(cfg_path), "preprocess"]
+        encode_slides_cmd = ["stamp", "--config", str(cfg_path), "encode_slides"]
         crossval_cmd = ["stamp", "--config", str(cfg_path), "crossval"]
         crossval_out_dir = crossval_runs_base / model_name
         analysis_out_dir = run_dir / "analysis" / model_name
@@ -257,6 +280,8 @@ def main() -> None:
             plot_cmd = [
                 sys.executable,
                 "scripts/plot_results.py",
+                "--project",
+                str(args.project),
                 "--predictions",
                 str(fusion_predictions_csv),
                 "--out_dir",
@@ -320,6 +345,163 @@ def main() -> None:
                 print(f"{prefix} analyze/fusion/plot: (not requested)")
             return
 
+        # -----------------------------
+        # Optional slide-level encoding
+        # -----------------------------
+        if se_cfg is not None and se_cfg.enabled:
+            expected_key = se_cfg.model_key
+            if model_name != expected_key:
+                raise SystemExit(
+                    f"{prefix} slide_encoding is enabled (encoder={se_cfg.encoder}, feat_model={se_cfg.feat_model}, "
+                    f"agg_feat_model={se_cfg.agg_feat_model}), but selected model is {model_name!r}. "
+                    f"Expected model key: {expected_key!r}."
+                )
+
+            try:
+                def _ensure_tile_features(tile_model: str) -> Path | None:
+                    tile_cfg_path = run_dir / "configs" / "stamp" / f"config_preprocess_{tile_model}.yaml"
+                    if not tile_cfg_path.exists():
+                        tile_cfg = build_stamp_config(merged, tile_model, run_dir=run_dir)
+                        dump_yaml(tile_cfg, tile_cfg_path)
+                    cmd = ["stamp", "--config", str(tile_cfg_path), "preprocess"]
+
+                    out = find_preprocess_output_dir(tile_model, preprocess_base)
+                    if out is None and args.skip_preprocess:
+                        raise ValueError(
+                            f"{tile_model}: --skip-preprocess set but no feature_dir detected under {preprocess_base}"
+                        )
+                    should_run = False
+                    if args.run_preprocess:
+                        should_run = True
+                    elif args.skip_preprocess:
+                        should_run = False
+                    else:
+                        should_run = out is None
+
+                    print(f"{prefix} 2) tile features ({tile_model}): {str(out) if out is not None else '(none yet)'}")
+                    if should_run:
+                        if dry_run:
+                            print(f"{prefix}    preprocess({tile_model}) decision: WILL RUN (dry-run; not executing)")
+                        else:
+                            print(f"{prefix}    preprocess({tile_model}) decision: running preprocess now...")
+                            subprocess.run(cmd, check=True, env=env)
+                        out = find_preprocess_output_dir(tile_model, preprocess_base)
+                        if out is None:
+                            if dry_run:
+                                print(f"{prefix}    preprocess({tile_model}) result: feature_dir not detected yet (dry-run)")
+                            else:
+                                raise RuntimeError(
+                                    f"{tile_model}: preprocess finished but no output dir found under {preprocess_base}"
+                                )
+                    else:
+                        print(f"{prefix}    preprocess({tile_model}) decision: SKIP")
+
+                    if out is None:
+                        if dry_run and should_run:
+                            return None
+                        raise RuntimeError(f"{tile_model}: feature_dir not detected under {preprocess_base}")
+                    return out
+
+                feat_dir = _ensure_tile_features(se_cfg.feat_model)
+                agg_feat_dir = None
+                if se_cfg.agg_feat_model:
+                    agg_feat_dir = _ensure_tile_features(se_cfg.agg_feat_model)
+                elif se_cfg.encoder.strip().lower() == "eagle":
+                    raise ValueError("slide_encoding.encoder=eagle requires slide_encoding.agg_feat_model.")
+            except Exception as exc:
+                raise SystemExit(f"{prefix} {exc}") from exc
+
+            out_dir = slide_encoding_output_dir(se_cfg.output_base, model_key=model_name)
+            if feat_dir is not None and (agg_feat_dir is not None or (not se_cfg.agg_feat_model)):
+                update_stamp_config_slide_encoding(
+                    cfg_path,
+                    encoder=se_cfg.encoder,
+                    feat_dir=feat_dir,
+                    agg_feat_dir=agg_feat_dir,
+                    output_dir=out_dir,
+                    device=se_cfg.device,
+                    generate_hash=se_cfg.generate_hash,
+                )
+
+            detected_slide_dir = find_slide_encoding_output_dir(out_dir, encoder=se_cfg.encoder)
+            print(f"{prefix} 3) slide_encoding:")
+            print(f"{prefix}    encoder: {se_cfg.encoder}")
+            print(f"{prefix}    feat_model: {se_cfg.feat_model}")
+            print(f"{prefix}    feat_dir: {feat_dir if feat_dir is not None else '(none yet)'}")
+            if agg_feat_dir is not None:
+                print(f"{prefix}    agg_feat_model: {se_cfg.agg_feat_model}")
+                print(f"{prefix}    agg_feat_dir: {agg_feat_dir}")
+            print(f"{prefix}    output_dir: {out_dir}")
+            print(f"{prefix}    detected slide feature_dir: {str(detected_slide_dir) if detected_slide_dir else '(none yet)'}")
+
+            should_run_encode = False
+            if args.skip_slide_encoding:
+                should_run_encode = False
+                print(f"{prefix}    encode_slides decision: SKIP (flag set)")
+            elif args.reuse_slide_encoding:
+                should_run_encode = detected_slide_dir is None
+                print(f"{prefix}    encode_slides decision: {'WILL RUN' if should_run_encode else 'SKIP'} (reuse-slide-encoding)")
+            else:
+                should_run_encode = detected_slide_dir is None
+                print(f"{prefix}    encode_slides decision: {'WILL RUN' if should_run_encode else 'SKIP'}")
+
+            if should_run_encode:
+                if dry_run:
+                    print(f"{prefix} 4) encode_slides: {shlex.join(encode_slides_cmd)}")
+                else:
+                    print(f"{prefix} 4) encode_slides: running now...")
+                    subprocess.run(encode_slides_cmd, check=True, env=env)
+
+            slide_out = find_slide_encoding_output_dir(out_dir, encoder=se_cfg.encoder)
+            if slide_out is None:
+                if dry_run and should_run_encode:
+                    print(f"{prefix} 5) crossval.feature_dir (slide-level): (not ready yet; would be {out_dir}/<encoder>-slide-*/)")
+                    print(f"{prefix} 6) crossval: {shlex.join(crossval_cmd)}")
+                    print(f"{prefix}    crossval decision: NOT READY (encode_slides not executed in dry-run)")
+                    if args.analyze:
+                        print(f"{prefix} 7) analyze: (skipped; crossval not run)")
+                        print(f"{prefix}    analyze command: {shlex.join(analyze_cmd)}")
+                    return
+                raise RuntimeError(
+                    f"{prefix} slide encoding output not detected under {out_dir} "
+                    f"(encoder={se_cfg.encoder}); use --execute to run encode_slides or provide existing output."
+                )
+
+            final_feature_dir = slide_out
+            print(f"{prefix} 5) crossval.feature_dir (slide-level): {final_feature_dir}")
+            update_stamp_config_feature_dir(cfg_path, final_feature_dir)
+
+            print(f"{prefix} 6) crossval: {shlex.join(crossval_cmd)}")
+            if dry_run:
+                if args.analyze:
+                    print(f"{prefix} 7) analyze: {shlex.join(analyze_cmd)}")
+                    if args.fusion and run_fusion_cfg:
+                        print(f"{prefix} 8) fusion: {shlex.join(fusion_cmd)}")
+                    if args.plot:
+                        print(f"{prefix} 9) plot: {shlex.join(plot_cmd)}")
+                return
+
+            subprocess.run(crossval_cmd, check=True, env=env)
+            if args.analyze:
+                print(f"{prefix} 7) analyze: {shlex.join(analyze_cmd)}")
+                subprocess.run(analyze_cmd, check=True)
+                try:
+                    _ = validate_predictions_complete(predictions_csv, merged)
+                except Exception as exc:
+                    raise SystemExit(
+                        f"{prefix} Prediction completeness check failed for {predictions_csv}:\n{exc}"
+                    ) from exc
+                if args.fusion and run_fusion_cfg:
+                    print(f"{prefix} 8) fusion: {shlex.join(fusion_cmd)}")
+                    subprocess.run(fusion_cmd, check=True)
+                if args.plot:
+                    print(f"{prefix} 9) plot: {shlex.join(plot_cmd)}")
+                    subprocess.run(plot_cmd, check=True)
+            return
+
+        # -----------------------------
+        # Standard tile-feature pipeline
+        # -----------------------------
         preprocess_out = find_preprocess_output_dir(model_name, preprocess_base)
         detected_str = str(preprocess_out) if preprocess_out is not None else "(none yet)"
         print(f"{prefix} 2) detected feature_dir: {detected_str}")

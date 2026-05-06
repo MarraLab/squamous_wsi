@@ -5,6 +5,8 @@ from typing import Any, Dict, List
 
 import yaml
 
+from wsi_recurrence.slide_encoding import fs_safe_key, parse_slide_encoding_config
+
 
 _DEFAULT_ADVANCED_CONFIG: Dict[str, Any] = {
     "seed": 42,
@@ -52,7 +54,18 @@ def _resolve_advanced_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         raw = {}
     if not isinstance(raw, dict):
         raise ValueError("advanced_config must be a mapping (YAML dict) when provided.")
-    return _deep_merge(_DEFAULT_ADVANCED_CONFIG, raw)
+    merged = _deep_merge(_DEFAULT_ADVANCED_CONFIG, raw)
+
+    # STAMP supports multiple aggregator model_name values (e.g. vit/trans_mil/mlp/linear/barspoon).
+    # Keep vit defaults intact, but if the selected model_name isn't present in model_params, add an empty dict.
+    model_name = str(merged.get("model_name", "")).strip()
+    model_params = merged.get("model_params", None)
+    if model_name and isinstance(model_params, dict) and model_name not in model_params:
+        model_params = dict(model_params)
+        model_params[model_name] = {}
+        merged["model_params"] = model_params
+
+    return merged
 
 
 def _validate_advanced_config(advanced: Dict[str, Any], *, context: str) -> None:
@@ -123,7 +136,15 @@ def build_stamp_config(cfg: Dict[str, Any], model_name: str, *, run_dir: Path) -
     preprocess_base = _join_under_project(project_dir, outputs.get("preprocess_base", "stamp_preprocess"))
     crossval_base = _join_under_project(project_dir, outputs.get("crossval_base", "stamp_crossval"))
 
-    output_base = preprocess_base / model_name / "wsi"
+    se = parse_slide_encoding_config(cfg)
+
+    # In slide-encoding mode, the experiment `model_name` is a model key (e.g. eagle_ctranspath_virchow2),
+    # but STAMP preprocessing.extractor must be an actual tile-feature extractor (feat_model).
+    preprocessing_model = model_name
+    if se is not None and se.enabled:
+        preprocessing_model = se.feat_model
+
+    output_base = preprocess_base / preprocessing_model / "wsi"
     # Crossval outputs should be unique per run, but stay under project_dir.
     run_id = run_dir.name
     crossval_run_dir = project_dir / "stamp_crossval_runs" / run_id / model_name
@@ -131,7 +152,7 @@ def build_stamp_config(cfg: Dict[str, Any], model_name: str, *, run_dir: Path) -
         "preprocessing": {
             "output_dir": str(output_base),
             "wsi_dir": str(wsi_dir),
-            "extractor": str(model_name),
+            "extractor": str(preprocessing_model),
             "device": str(stamp.get("device", "cuda")),
             "cache_dir": str(cache_dir),
             "max_workers": int(stamp.get("max_workers", 16)),
@@ -185,6 +206,75 @@ def find_preprocess_output_dir(model_name: str, preprocess_base: Path) -> Path |
         return None
     return sorted(subdirs)[-1]
 
+
+def update_stamp_config_slide_encoding(
+    config_path: Path,
+    *,
+    encoder: str,
+    feat_dir: Path,
+    output_dir: Path,
+    device: str = "cuda",
+    generate_hash: bool = True,
+    agg_feat_dir: Path | None = None,
+) -> None:
+    """
+    Write/replace the `slide_encoding` section in a STAMP YAML config.
+    """
+    cfg = _load_yaml(config_path)
+    se: Dict[str, Any] = {
+        "encoder": str(encoder),
+        "feat_dir": str(feat_dir),
+        "output_dir": str(output_dir),
+        "device": str(device),
+        "generate_hash": bool(generate_hash),
+    }
+    if agg_feat_dir is not None:
+        se["agg_feat_dir"] = str(agg_feat_dir)
+    cfg["slide_encoding"] = se
+    _dump_yaml(cfg, config_path)
+
+
+def find_slide_encoding_output_dir(output_dir: Path, *, encoder: str | None = None) -> Path | None:
+    """
+    Detect STAMP slide-level encoding outputs.
+
+    STAMP encoders typically create a subdirectory like:
+      <output_dir>/<encoder>-slide[-<hash>]/
+    containing one `.h5` file per slide.
+    """
+    if not output_dir.exists():
+        return None
+
+    subdirs = [p for p in output_dir.iterdir() if p.is_dir()]
+    if not subdirs:
+        return None
+
+    enc = (encoder or "").strip().lower()
+    if enc:
+        preferred = [p for p in subdirs if p.name.lower().startswith(f"{enc}-slide")]
+        if preferred:
+            subdirs = preferred
+
+    candidates: list[Path] = []
+    for d in subdirs:
+        try:
+            if any(p.is_file() and p.suffix.lower() == ".h5" for p in d.iterdir()):
+                candidates.append(d)
+        except OSError:
+            continue
+    if not candidates:
+        return None
+    return sorted(candidates)[-1]
+
+
+def slide_encoding_output_dir(output_base: Path, *, model_key: str) -> Path:
+    """
+    Deterministic per-experiment slide-encoding output directory under a configured base.
+    """
+    safe = fs_safe_key(model_key)
+    if not safe:
+        raise ValueError("slide encoding model_key resolved to an empty string.")
+    return output_base / safe
 
 def update_stamp_config_feature_dir(config_path: Path, feature_dir: Path | str) -> None:
     """

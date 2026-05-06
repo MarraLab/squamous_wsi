@@ -66,13 +66,51 @@ def _plot_km(out_path: Path, time_s: pd.Series, event_s: pd.Series, risk_s: pd.S
     return True
 
 
-def _infer_pred_col(df: pd.DataFrame) -> str:
-    if "pred" in df.columns:
-        return "pred"
-    pred_cols = [c for c in df.columns if str(c).startswith("pred_")]
+def _first_present(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    for c in candidates:
+        if c in df.columns:
+            return c
+    return None
+
+
+def _infer_wsi_pred_col(df: pd.DataFrame, *, explicit: str | None) -> str:
+    if explicit:
+        if explicit not in df.columns:
+            raise ValueError(f"Missing prediction column {explicit!r}; available columns: {sorted(df.columns)}")
+        return explicit
+
+    direct = _first_present(df, ["pred", "pred_wsi"])
+    if direct is not None:
+        return direct
+
+    pred_cols = [str(c) for c in df.columns if str(c).startswith("pred_")]
     if len(pred_cols) == 1:
         return pred_cols[0]
-    raise ValueError("Could not infer prediction column (expected 'pred' or a single 'pred_*').")
+    raise ValueError(
+        "Could not infer WSI prediction column. "
+        "Expected 'pred'/'pred_wsi' or a single 'pred_*' column; "
+        f"available columns: {sorted(df.columns)}. "
+        "Pass --pred_col to select explicitly."
+    )
+
+
+def _infer_label_col(project_path: str, *, cli_label_col: str) -> str:
+    if str(cli_label_col).strip():
+        return str(cli_label_col).strip()
+    if str(project_path).strip():
+        cfg = load_project_config(Path(str(project_path)))
+        columns_cfg = (cfg.get("columns", {}) or {}) if isinstance(cfg, dict) else {}
+        crossval_cfg = (cfg.get("crossval", {}) or {}) if isinstance(cfg, dict) else {}
+        inferred = str(columns_cfg.get("label") or "").strip() or str(crossval_cfg.get("ground_truth_label") or "").strip()
+        if inferred:
+            return inferred
+    return "recur"
+
+
+def _infer_aux_pred_cols(df: pd.DataFrame) -> tuple[str | None, str | None]:
+    clinical = _first_present(df, ["clinical_pred", "pred_clinical"])
+    fusion = _first_present(df, ["fusion_pred", "pred_fusion"])
+    return clinical, fusion
 
 
 def main():
@@ -87,8 +125,8 @@ def main():
         default="",
         help="Deprecated alias for --predictions (kept for backward compatibility).",
     )
-    ap.add_argument("--project", default="", help="Optional project YAML for outcome column metadata.")
-    ap.add_argument("--label_col", default="recur", help="Ground-truth label column.")
+    ap.add_argument("--project", default="", help="Optional project YAML for label/outcome column metadata.")
+    ap.add_argument("--label_col", default="", help="Ground-truth label column (overrides project config).")
     ap.add_argument("--pred_col", default="", help="WSI prediction column (defaults to inferred).")
     ap.add_argument("--time_col", default="", help="Optional time-to-event column for KM plotting.")
     ap.add_argument("--event_col", default="", help="Optional event indicator column for KM plotting.")
@@ -105,21 +143,26 @@ def main():
 
     df = pd.read_csv(pred_path)
 
-    label_col = str(args.label_col).strip()
+    project_path = str(args.project).strip()
+    label_col = _infer_label_col(project_path, cli_label_col=args.label_col)
     if label_col not in df.columns:
-        raise ValueError(f"Missing required label column {label_col!r} in {pred_path}")
+        raise ValueError(
+            "Missing required label column "
+            f"{label_col!r} in {pred_path}. "
+            f"Available columns: {sorted(df.columns)}. "
+            "Pass --project to infer from config or override with --label_col."
+        )
 
-    pred_col = str(args.pred_col).strip() or _infer_pred_col(df)
-    if pred_col not in df.columns:
-        raise ValueError(f"Missing prediction column {pred_col!r} in {pred_path}")
+    pred_col = _infer_wsi_pred_col(df, explicit=(str(args.pred_col).strip() or None))
 
     y_true = pd.to_numeric(df[label_col], errors="coerce").values
     y_wsi = pd.to_numeric(df[pred_col], errors="coerce").values
 
-    has_fusion = "fusion_pred" in df.columns
-    has_clinical = "clinical_pred" in df.columns
-    y_fusion = pd.to_numeric(df["fusion_pred"], errors="coerce").values if has_fusion else None
-    y_clin = pd.to_numeric(df["clinical_pred"], errors="coerce").values if has_clinical else None
+    clinical_col, fusion_col = _infer_aux_pred_cols(df)
+    has_clinical = clinical_col is not None
+    has_fusion = fusion_col is not None
+    y_clin = pd.to_numeric(df[clinical_col], errors="coerce").values if clinical_col else None
+    y_fusion = pd.to_numeric(df[fusion_col], errors="coerce").values if fusion_col else None
 
     # -------------------------
     # ROC comparison
@@ -195,7 +238,6 @@ def main():
     time_col = str(args.time_col).strip()
     event_col = str(args.event_col).strip()
     if (not time_col) or (not event_col):
-        project_path = str(args.project).strip()
         if project_path:
             project_cfg = load_project_config(Path(project_path))
             analysis_cfg = analysis_defaults(project_cfg)
@@ -213,9 +255,9 @@ def main():
 
     _plot_km(out_dir / "km_wsi.png", time_s, event_s, df[pred_col], title="KM: WSI (median split)")
     if has_clinical:
-        _plot_km(out_dir / "km_clinical.png", time_s, event_s, df["clinical_pred"], title="KM: Clinical (median split)")
+        _plot_km(out_dir / "km_clinical.png", time_s, event_s, df[clinical_col], title="KM: Clinical (median split)")
     if has_fusion:
-        _plot_km(out_dir / "km_fusion.png", time_s, event_s, df["fusion_pred"], title="KM: Fusion (median split)")
+        _plot_km(out_dir / "km_fusion.png", time_s, event_s, df[fusion_col], title="KM: Fusion (median split)")
 
 
 if __name__ == "__main__":
