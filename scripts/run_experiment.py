@@ -7,6 +7,7 @@ import sys
 import subprocess
 import shlex
 import os
+import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
@@ -122,6 +123,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="If slide-encoding output is detected, skip encode_slides; otherwise run it.",
     )
+    se.add_argument(
+        "--run-slide-encoding",
+        action="store_true",
+        help=(
+            "Force STAMP encode_slides to run. Existing slide-encoding outputs for the selected "
+            "model are removed first so downstream crossval uses newly generated slide features."
+        ),
+    )
     ap.add_argument(
         "--existing-run-dir",
         type=Path,
@@ -175,7 +184,7 @@ def main() -> None:
         )
     run_dir = create_run_dir(args.out_root, spec.name)
 
-    manifest = build_manifest(spec, run_dir)
+    manifest = build_manifest(spec, run_dir, cli_argv=sys.argv)
     dump_yaml(manifest, run_dir / "manifest.yaml")
 
     config_paths = write_stamp_configs(spec.config, spec.models(), run_dir=run_dir)
@@ -438,6 +447,9 @@ def main() -> None:
             if args.skip_slide_encoding:
                 should_run_encode = False
                 print(f"{prefix}    encode_slides decision: SKIP (flag set)")
+            elif args.run_slide_encoding:
+                should_run_encode = True
+                print(f"{prefix}    encode_slides decision: WILL RUN (force flag set)")
             elif args.reuse_slide_encoding:
                 should_run_encode = detected_slide_dir is None
                 print(f"{prefix}    encode_slides decision: {'WILL RUN' if should_run_encode else 'SKIP'} (reuse-slide-encoding)")
@@ -447,8 +459,13 @@ def main() -> None:
 
             if should_run_encode:
                 if dry_run:
+                    if args.run_slide_encoding and out_dir.exists():
+                        print(f"{prefix}    remove existing slide_encoding output: {out_dir} (dry-run; not removing)")
                     print(f"{prefix} 4) encode_slides: {shlex.join(encode_slides_cmd)}")
                 else:
+                    if args.run_slide_encoding and out_dir.exists():
+                        print(f"{prefix}    removing existing slide_encoding output: {out_dir}")
+                        shutil.rmtree(out_dir)
                     print(f"{prefix} 4) encode_slides: running now...")
                     subprocess.run(encode_slides_cmd, check=True, env=env)
 

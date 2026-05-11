@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import shlex
 from typing import Any, Dict, Tuple
 
 import yaml
@@ -81,7 +82,19 @@ def create_run_dir(out_root: Path, experiment_name: str, ts: str | None = None) 
     return run_dir
 
 
-def build_manifest(spec: ExperimentSpec, run_dir: Path) -> Dict[str, Any]:
+def build_manifest(spec: ExperimentSpec, run_dir: Path, cli_argv: list[str] | None = None) -> Dict[str, Any]:
+    provenance: Dict[str, Any] = {
+        "project_yaml": str(spec.project_path),
+        "experiment_yaml": str(spec.experiment_path),
+        "run_dir": str(run_dir),
+    }
+    if cli_argv is not None:
+        argv = [str(x) for x in cli_argv]
+        provenance["cli"] = {
+            "argv": argv,
+            "command": shlex.join(argv),
+        }
+
     return {
         "experiment": spec.config.get("experiment", {}),
         "project": spec.config.get("project", {}),
@@ -93,9 +106,5 @@ def build_manifest(spec: ExperimentSpec, run_dir: Path) -> Dict[str, Any]:
         "tile_filter": spec.config.get("tile_filter", {}),
         "slide_encoding": spec.config.get("slide_encoding", {}),
         "models": spec.models(),
-        "provenance": {
-            "project_yaml": str(spec.project_path),
-            "experiment_yaml": str(spec.experiment_path),
-            "run_dir": str(run_dir),
-        },
+        "provenance": provenance,
     }
