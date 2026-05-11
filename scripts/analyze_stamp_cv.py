@@ -333,13 +333,24 @@ def main() -> None:
 
     # Combined predictions
     first_model = list(all_results.keys())[0]
-    combined_df = all_results[first_model][["patient", label_col, "pred"]].copy()
+    combined_df = all_results[first_model][["patient", label_col, "split", "pred"]].copy()
+    combined_df = combined_df.rename(columns={"split": "fold"})
     combined_df = combined_df.rename(columns={"pred": f"pred_{first_model}"})
 
     for model_name in list(all_results.keys())[1:]:
-        model_preds = all_results[model_name][["patient", "pred"]].copy()
+        model_preds = all_results[model_name][["patient", "split", "pred"]].copy()
+        model_preds = model_preds.rename(columns={"split": f"fold_{model_name}"})
         model_preds = model_preds.rename(columns={"pred": f"pred_{model_name}"})
         combined_df = combined_df.merge(model_preds, on="patient", how="left")
+        both = combined_df["fold"].notna() & combined_df[f"fold_{model_name}"].notna()
+        mismatch = both & (combined_df["fold"] != combined_df[f"fold_{model_name}"])
+        if bool(mismatch.any()):
+            preview = combined_df.loc[mismatch, ["patient", "fold", f"fold_{model_name}"]].head(10)
+            raise RuntimeError(
+                f"Fold mismatch while combining model {model_name!r}; all models in a run must use the same splits.\n"
+                + preview.to_string(index=False)
+            )
+        combined_df = combined_df.drop(columns=[f"fold_{model_name}"])
 
     combined_path = base_out_dir / f"all_predictions_{run_name}.csv"
     combined_df.to_csv(combined_path, index=False)

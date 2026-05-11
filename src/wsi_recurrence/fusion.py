@@ -20,6 +20,35 @@ class FusionResult:
     metrics: pd.DataFrame
 
 
+def _fixed_fold_splits(df: pd.DataFrame, *, fold_col: str, id_col: str) -> tuple[list[tuple[int, np.ndarray, np.ndarray]], int]:
+    fold_values = pd.to_numeric(df[fold_col], errors="coerce")
+    if fold_values.isna().any():
+        n_bad = int(fold_values.isna().sum())
+        raise ValueError(f"Fold column {fold_col!r} contains {n_bad} missing/non-numeric value(s).")
+
+    patient_folds = pd.DataFrame({id_col: df[id_col].astype(str), fold_col: fold_values.astype(int)})
+    n_fold_per_patient = patient_folds.groupby(id_col)[fold_col].nunique()
+    bad_patients = n_fold_per_patient[n_fold_per_patient > 1]
+    if not bad_patients.empty:
+        preview = ", ".join(bad_patients.index.astype(str).tolist()[:10])
+        raise ValueError(f"Patients appear in multiple folds in {fold_col!r}: {preview}")
+
+    fold_ids = sorted(fold_values.astype(int).unique().tolist())
+    if len(fold_ids) < 2:
+        raise ValueError(f"Fold column {fold_col!r} must contain at least two unique folds.")
+
+    splits: list[tuple[int, np.ndarray, np.ndarray]] = []
+    fold_array = fold_values.astype(int).to_numpy()
+    row_idx = np.arange(len(df))
+    for fold_id in fold_ids:
+        te = row_idx[fold_array == fold_id]
+        tr = row_idx[fold_array != fold_id]
+        if len(te) == 0 or len(tr) == 0:
+            raise ValueError(f"Fold {fold_id} from {fold_col!r} produced an empty train/test split.")
+        splits.append((int(fold_id), tr, te))
+    return splits, len(fold_ids)
+
+
 def evaluate_fusion_groupkfold(
     df_in: pd.DataFrame,
     *,
@@ -32,6 +61,7 @@ def evaluate_fusion_groupkfold(
     class_weight: str | None = "balanced",
     solver: str = "lbfgs",
     max_iter: int = 5000,
+    fold_col: str | None = None,
 ) -> FusionResult:
     """
     Grouped K-fold fusion evaluation:
@@ -44,6 +74,8 @@ def evaluate_fusion_groupkfold(
     Numeric features are scaled with StandardScaler.
 
     Mirrors the fusion core in CLAM/run_stamp_pipeline.py (no plotting).
+    If `fold_col` is provided, those fold assignments are reused instead of
+    creating new GroupKFold splits.
     """
     df = df_in.copy()
 
@@ -52,15 +84,19 @@ def evaluate_fusion_groupkfold(
     clinical_features = [str(c) for c in clinical_features if str(c).strip()]
 
     needed = [id_col, label_col, pred_col, *clinical_features]
+    if fold_col:
+        needed.append(fold_col)
     missing = [c for c in needed if c not in df.columns]
     if missing:
         raise ValueError(f"Missing required columns: {missing}")
 
-    df = df.dropna(subset=[pred_col, label_col, id_col]).reset_index(drop=True)
+    drop_subset = [pred_col, label_col, id_col]
+    if fold_col:
+        drop_subset.append(fold_col)
+    df = df.dropna(subset=drop_subset).reset_index(drop=True)
     if df.empty:
         raise ValueError("No valid rows after dropping NA predictions/labels/ids.")
 
-    X_pred = df[[pred_col]].copy()
     X_clin = df[clinical_features].copy() if clinical_features else pd.DataFrame(index=df.index)
     y = df[label_col].astype(int).values
     groups = df[id_col].values
@@ -104,7 +140,17 @@ def evaluate_fusion_groupkfold(
     pipe_fusion = _make_pipe(fusion_num, fusion_cat)
     pipe_clin = _make_pipe(clin_num, clin_cat) if clinical_features else None
 
-    gkf = GroupKFold(n_splits=n_splits)
+    if fold_col:
+        splits, effective_n_splits = _fixed_fold_splits(df, fold_col=fold_col, id_col=id_col)
+        split_source = f"fixed:{fold_col}"
+    else:
+        gkf = GroupKFold(n_splits=n_splits)
+        splits = [
+            (fold, tr, te)
+            for fold, (tr, te) in enumerate(gkf.split(df[[pred_col, *clinical_features]].copy(), y, groups=groups))
+        ]
+        effective_n_splits = int(n_splits)
+        split_source = "GroupKFold"
     oof_fusion = np.zeros(len(df), dtype=float)
     oof_clin = np.full(len(df), np.nan, dtype=float)
     fold_idx = np.full(len(df), -1, dtype=int)
@@ -113,7 +159,7 @@ def evaluate_fusion_groupkfold(
 
     X_fusion = df[[pred_col, *clinical_features]].copy()
 
-    for fold, (tr, te) in enumerate(gkf.split(X_fusion, y, groups=groups)):
+    for fold, tr, te in splits:
         pipe_fusion.fit(X_fusion.iloc[tr], y[tr])
         p_fusion = pipe_fusion.predict_proba(X_fusion.iloc[te])[:, 1]
         oof_fusion[te] = p_fusion
@@ -149,7 +195,8 @@ def evaluate_fusion_groupkfold(
         "n": int(len(df)),
         "n_pos": int(df[label_col].sum()),
         "n_groups": int(pd.Series(groups).nunique()),
-        "n_splits": int(n_splits),
+        "n_splits": int(effective_n_splits),
+        "split_source": split_source,
     }
     metrics = pd.DataFrame(
         [

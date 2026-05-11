@@ -53,6 +53,12 @@ def parse_args() -> argparse.Namespace:
     )
     ap.add_argument("--solver", type=str, default="", help="LogisticRegression solver (overrides config analysis.fusion_model.solver).")
     ap.add_argument("--max_iter", type=int, default=None, help="LogisticRegression max_iter (overrides config analysis.fusion_model.max_iter).")
+    ap.add_argument(
+        "--fold_col",
+        type=str,
+        default="",
+        help="Existing fold column to reuse for fusion. Defaults to 'fold' or 'split' when present.",
+    )
     return ap.parse_args()
 
 
@@ -126,6 +132,14 @@ def main() -> None:
 
     pred_df = pd.read_csv(args.pred_csv)
     pred_col = args.pred_col.strip() or _infer_pred_col(pred_df)
+    fold_col = args.fold_col.strip()
+    if not fold_col:
+        if "fold" in pred_df.columns:
+            fold_col = "fold"
+        elif "split" in pred_df.columns:
+            fold_col = "split"
+    if fold_col:
+        print(f"Using fixed fold assignments from column {fold_col!r} for fusion.")
 
     clinical_df = load_clinical_table(clin_path)
     clinical_id_col, clinical_stage_col = infer_merge_columns(
@@ -185,6 +199,7 @@ def main() -> None:
         class_weight=model_params.class_weight,
         solver=model_params.solver,
         max_iter=model_params.max_iter,
+        fold_col=fold_col or None,
     )
 
     # Optionally drop rows with missing time/event for KM use, without affecting model fit.
