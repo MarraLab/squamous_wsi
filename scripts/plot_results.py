@@ -2,12 +2,57 @@
 
 import argparse
 from pathlib import Path
+import re
 
 import pandas as pd
 import matplotlib.pyplot as plt
 
 from wsi_recurrence.metrics import compute_auc, compute_pr_auc, plot_pr, plot_roc
 from wsi_recurrence.clinical import analysis_defaults, load_project_config
+
+
+def _safe_label(value: str) -> str:
+    label = re.sub(r"[\s/:\\]+", "_", str(value).strip())
+    label = re.sub(r"_+", "_", label).strip("_")
+    return label
+
+
+def _infer_model_label(out_dir: Path) -> str:
+    # Expected pipeline layout: .../analysis/<model>/figures
+    if out_dir.name == "figures" and out_dir.parent.name:
+        return out_dir.parent.name
+    return ""
+
+
+def _infer_experiment_label(out_dir: Path) -> str:
+    parts = out_dir.resolve().parts
+    for i in range(len(parts) - 2):
+        if parts[i] == "outputs" and parts[i + 1] == "runs":
+            return parts[i + 2]
+    return ""
+
+
+def _title(base: str, model_label: str, experiment_label: str) -> str:
+    if model_label and experiment_label:
+        return f"{base} - {model_label}\n{experiment_label}"
+    if model_label:
+        return f"{base} - {model_label}"
+    return base
+
+
+def _plot_path(out_dir: Path, stem: str, model_label: str, *, legacy_stem: str | None = None) -> Path:
+    safe = _safe_label(model_label)
+    if safe:
+        return out_dir / f"{stem}__{safe}.png"
+    return out_dir / f"{legacy_stem or stem}.png"
+
+
+def _savefig(fig: plt.Figure, out_path: Path, *, metadata: dict[str, str], legacy_path: Path | None = None) -> None:
+    fig.savefig(out_path, dpi=300, bbox_inches="tight", metadata=metadata)
+    print(f"Saved: {out_path}")
+    if legacy_path is not None and legacy_path != out_path:
+        fig.savefig(legacy_path, dpi=300, bbox_inches="tight", metadata=metadata)
+        print(f"Saved legacy alias: {legacy_path}")
 
 
 def _try_import_lifelines():
@@ -18,7 +63,16 @@ def _try_import_lifelines():
     return KaplanMeierFitter
 
 
-def _plot_km(out_path: Path, time_s: pd.Series, event_s: pd.Series, risk_s: pd.Series, title: str) -> bool:
+def _plot_km(
+    out_path: Path,
+    time_s: pd.Series,
+    event_s: pd.Series,
+    risk_s: pd.Series,
+    title: str,
+    *,
+    metadata: dict[str, str],
+    legacy_path: Path | None = None,
+) -> bool:
     KaplanMeierFitter = _try_import_lifelines()
     if KaplanMeierFitter is None:
         print("WARNING: lifelines not installed; skipping KM plotting.")
@@ -60,9 +114,8 @@ def _plot_km(out_path: Path, time_s: pd.Series, event_s: pd.Series, risk_s: pd.S
     ax.grid(alpha=0.3)
     ax.legend()
 
-    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    _savefig(fig, out_path, metadata=metadata, legacy_path=legacy_path)
     plt.close(fig)
-    print(f"Saved: {out_path}")
     return True
 
 
@@ -130,16 +183,26 @@ def main():
     ap.add_argument("--pred_col", default="", help="WSI prediction column (defaults to inferred).")
     ap.add_argument("--time_col", default="", help="Optional time-to-event column for KM plotting.")
     ap.add_argument("--event_col", default="", help="Optional event indicator column for KM plotting.")
+    ap.add_argument("--model_label", default="", help="Model/tool label for plot titles and filenames.")
+    ap.add_argument("--experiment_label", default="", help="Experiment/run label for plot titles and PNG metadata.")
+    ap.add_argument("--legacy_plot_names", action="store_true", help="Also write old plot filenames as aliases.")
     ap.add_argument("--out_dir", required=True)
     args = ap.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    model_label = str(args.model_label).strip() or _infer_model_label(out_dir)
+    experiment_label = str(args.experiment_label).strip() or _infer_experiment_label(out_dir)
 
     pred_path = (args.predictions or "").strip() or (args.fusion_predictions or "").strip()
     if not pred_path:
         raise ValueError("Provide --predictions (or legacy --fusion_predictions).")
     pred_path = str(pred_path)
+    metadata = {
+        "model_label": model_label,
+        "experiment_label": experiment_label,
+        "source_predictions": pred_path,
+    }
 
     df = pd.read_csv(pred_path)
 
@@ -180,14 +243,13 @@ def main():
     if has_clinical:
         plot_roc(ax, y_true, y_clin, label="Clinical")
 
-    ax.set_title("ROC comparison")
+    ax.set_title(_title("ROC curve", model_label, experiment_label))
     ax.legend()
 
-    out_path = out_dir / "roc_comparison.png"
-    plt.savefig(out_path, dpi=300, bbox_inches="tight")
+    out_path = _plot_path(out_dir, "roc_curve", model_label, legacy_stem="roc_comparison")
+    legacy_path = out_dir / "roc_comparison.png" if args.legacy_plot_names else None
+    _savefig(fig, out_path, metadata=metadata, legacy_path=legacy_path)
     plt.close(fig)
-
-    print(f"Saved: {out_path}")
 
     # -------------------------
     # PR comparison
@@ -198,12 +260,12 @@ def main():
         plot_pr(ax, y_true, y_fusion, label="Fusion")
     if has_clinical:
         plot_pr(ax, y_true, y_clin, label="Clinical")
-    ax.set_title("PR comparison")
+    ax.set_title(_title("Precision-Recall curve", model_label, experiment_label))
     ax.legend()
-    pr_path = out_dir / "pr_comparison.png"
-    plt.savefig(pr_path, dpi=300, bbox_inches="tight")
+    pr_path = _plot_path(out_dir, "pr_curve", model_label, legacy_stem="pr_comparison")
+    legacy_pr_path = out_dir / "pr_comparison.png" if args.legacy_plot_names else None
+    _savefig(fig, pr_path, metadata=metadata, legacy_path=legacy_pr_path)
     plt.close(fig)
-    print(f"Saved: {pr_path}")
 
     # -------------------------
     # Summary metrics
@@ -253,11 +315,35 @@ def main():
     time_s = df[time_col]
     event_s = df[event_col]
 
-    _plot_km(out_dir / "km_wsi.png", time_s, event_s, df[pred_col], title="KM: WSI (median split)")
+    _plot_km(
+        _plot_path(out_dir, "km_curve_wsi", model_label, legacy_stem="km_wsi"),
+        time_s,
+        event_s,
+        df[pred_col],
+        title=_title("Kaplan-Meier: WSI (median split)", model_label, experiment_label),
+        metadata=metadata,
+        legacy_path=(out_dir / "km_wsi.png") if args.legacy_plot_names else None,
+    )
     if has_clinical:
-        _plot_km(out_dir / "km_clinical.png", time_s, event_s, df[clinical_col], title="KM: Clinical (median split)")
+        _plot_km(
+            _plot_path(out_dir, "km_curve_clinical", model_label, legacy_stem="km_clinical"),
+            time_s,
+            event_s,
+            df[clinical_col],
+            title=_title("Kaplan-Meier: Clinical (median split)", model_label, experiment_label),
+            metadata=metadata,
+            legacy_path=(out_dir / "km_clinical.png") if args.legacy_plot_names else None,
+        )
     if has_fusion:
-        _plot_km(out_dir / "km_fusion.png", time_s, event_s, df[fusion_col], title="KM: Fusion (median split)")
+        _plot_km(
+            _plot_path(out_dir, "km_curve_fusion", model_label, legacy_stem="km_fusion"),
+            time_s,
+            event_s,
+            df[fusion_col],
+            title=_title("Kaplan-Meier: Fusion (median split)", model_label, experiment_label),
+            metadata=metadata,
+            legacy_path=(out_dir / "km_fusion.png") if args.legacy_plot_names else None,
+        )
 
 
 if __name__ == "__main__":
