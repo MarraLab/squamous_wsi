@@ -37,6 +37,7 @@ TREATMENT_COL = "Treatment (XRT or Chemo)?"
 NUMERIC_COLS = ["treatment_xrt", "treatment_chemo"]
 METADATA_KEY_COL = "EXCISION Surgical Case Number"
 METADATA_JOIN_COL = "patient"
+METADATA_LABEL_COL = "has_recurrence"
 METADATA_NUMERIC_COLS = ["has_lymph_node", "has_invasion"]
 METADATA_CATEGORICAL_COLS = ["hpv_p53_group", "risk"]
 MODEL_NUMERIC_COLS = NUMERIC_COLS + METADATA_NUMERIC_COLS
@@ -93,7 +94,7 @@ def clean_case_id(value):
 
 def load_vulvar_metadata(path):
     metadata = pd.read_csv(path)
-    cols = [METADATA_JOIN_COL, *METADATA_NUMERIC_COLS, *METADATA_CATEGORICAL_COLS]
+    cols = [METADATA_JOIN_COL, METADATA_LABEL_COL, *METADATA_NUMERIC_COLS, *METADATA_CATEGORICAL_COLS]
     missing = [col for col in cols if col not in metadata.columns]
     if missing:
         raise ValueError(f"Missing expected metadata columns from {path}: {missing}")
@@ -122,9 +123,40 @@ def normalize_label(series):
         series.astype(str)
         .str.strip()
         .str.upper()
-        .map({"Y": 1, "YES": 1, "1": 1, "TRUE": 1, "N": 0, "NO": 0, "0": 0, "FALSE": 0})
+        .map(
+            {
+                "Y": 1,
+                "YES": 1,
+                "1": 1,
+                "1.0": 1,
+                "TRUE": 1,
+                "N": 0,
+                "NO": 0,
+                "0": 0,
+                "0.0": 0,
+                "FALSE": 0,
+            }
+        )
     )
     return mapped
+
+
+def add_combined_recurrence_label(df):
+    out = df.copy()
+    excel_label = normalize_label(out[LABEL_COL])
+    metadata_label = normalize_label(out[METADATA_LABEL_COL]) if METADATA_LABEL_COL in out.columns else pd.Series(np.nan, index=out.index)
+    combined = excel_label.where(excel_label.notna(), metadata_label)
+
+    out["recurrence_excel_clean"] = excel_label
+    out["recurrence_metadata_clean"] = metadata_label
+    out["recurrence_label_disagreement"] = excel_label.notna() & metadata_label.notna() & excel_label.ne(metadata_label)
+    out["recurrence_label_source"] = np.select(
+        [excel_label.notna(), metadata_label.notna()],
+        ["excel", "metadata"],
+        default="none",
+    )
+    out["recurrence_combined"] = combined
+    return out
 
 
 def date_feature_frame(df, date_cols):
@@ -265,13 +297,22 @@ def prepare_features(df):
 
 def cleaned_values_frame(df, y, X):
     id_cols = [col for col in ID_COLS if col in df.columns]
-    raw_cols = [col for col in RAW_FEATURE_COLS if col in df.columns]
+    label_audit_cols = [
+        LABEL_COL,
+        METADATA_LABEL_COL,
+        "recurrence_excel_clean",
+        "recurrence_metadata_clean",
+        "recurrence_label_source",
+        "recurrence_label_disagreement",
+    ]
+    label_audit_cols = [col for col in label_audit_cols if col in df.columns]
+    raw_cols = [col for col in RAW_FEATURE_COLS if col in df.columns and col not in label_audit_cols]
     derived_cols = ["treatment_xrt", "treatment_chemo", "treatment_group", "site_of_cancer"]
     derived_cols = [col for col in derived_cols if col in df.columns]
     metadata_cols = ["metadata_case_id", "metadata_matched"] + METADATA_FEATURE_COLS
     metadata_cols = [col for col in metadata_cols if col in df.columns]
 
-    out = df[id_cols + raw_cols + derived_cols + metadata_cols].copy()
+    out = df[id_cols + label_audit_cols + raw_cols + derived_cols + metadata_cols].copy()
     out.insert(len(id_cols), "recurrence", y)
 
     model_values = X.copy()
@@ -822,8 +863,9 @@ def remove_stale_outputs(paths):
 df = load_vulvar_excel(EXCEL_PATH)
 metadata = load_vulvar_metadata(METADATA_PATH)
 df = join_vulvar_metadata(df, metadata)
+df = add_combined_recurrence_label(df)
 
-y = normalize_label(df[LABEL_COL])
+y = df["recurrence_combined"]
 keep = y.notna()
 df_model = df.loc[keep].reset_index(drop=True)
 df_model = add_derived_features(df_model)
@@ -837,6 +879,8 @@ print(f"Loaded metadata")
 print(f"  path: {METADATA_PATH}")
 print(f"  matched rows with recurrence label: {int(df_model['metadata_matched'].sum())}/{len(df_model)}")
 print(f"  rows with recurrence label: {len(df_model)}")
+print(f"  label source counts: {df_model['recurrence_label_source'].value_counts().to_dict()}")
+print(f"  label disagreements where both sources present: {int(df_model['recurrence_label_disagreement'].sum())}")
 print(f"  recurrence positives: {int(y.sum())}")
 print(f"  recurrence negatives: {int((1 - y).sum())}")
 print(f"  label column: {LABEL_COL}")
