@@ -9,6 +9,7 @@ import io
 import zipfile
 import re
 import glob
+import os
 import sys
 
 import numpy as np
@@ -24,7 +25,7 @@ from wsi_recurrence.tile_filter.zip_tiles import build_zip_coord_index, match_ti
 # Edit these
 # -------------------------
 LABEL_CSV = Path("tile_labels/combined.csv")
-CACHE_DIR = Path("/tmp/image_cache")
+CACHE_DIR = Path(os.environ.get("WSI_IMAGE_CACHE", ".cache/image_cache/lusc"))
 OUT_CSV = Path("all_tile_features.csv")
 
 # Coordinate matching tolerance in microns
@@ -327,7 +328,8 @@ df[(df["y"]==0)].sort_values("pred_prob", ascending=False).head(20)
 import joblib
 from pathlib import Path
 
-MODEL_PATH = Path("/projects/marralab/rcorbett_prj/LUSC/tile_filter_model.joblib")
+DATA_ROOT = Path(os.environ.get("WSI_DATA_ROOT", "data"))
+MODEL_PATH = DATA_ROOT / "lusc" / "tile_filter_model.joblib"
 
 joblib.dump({
     "model": model,

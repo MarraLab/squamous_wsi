@@ -9,11 +9,11 @@ analysis:
   outcome_event_col: null
 
 paths:
-  project_dir: /projects/marralab/rcorbett_prj/LUSC
-  wsi_dir: /projects/marralab/rcorbett_prj/LUSC
-  cache_dir: /tmp/image_cache
-  stamp_table: /projects/marralab/rcorbett_prj/LUSC/clin.csv
-  clinical_features_table: /projects/marralab/rcorbett_prj/LUSC/260310LUSCrecurrence_deID.csv
+  project_dir: data/lusc
+  wsi_dir: data/lusc
+  cache_dir: .cache/image_cache/lusc
+  stamp_table: data/lusc/clin.csv
+  clinical_features_table: data/lusc/260310LUSCrecurrence_deID.csv
 
 columns:
   pred_id: patient

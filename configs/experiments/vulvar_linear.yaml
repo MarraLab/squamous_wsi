@@ -21,10 +21,10 @@ models:
 
 tile_filter:
   enabled: false
-  model_path: /projects/marralab/rcorbett_prj/LUSC/tile_filter_model.joblib
+  model_path: ../lusc/tile_filter_model.joblib
   threshold: 0.30
-  keep_mask_dir: /projects/marralab/rcorbett_prj/LUSC/tile_keep_masks
-  filtered_preprocess_base: /projects/marralab/rcorbett_prj/LUSC/stamp_preprocess_filtered
+  keep_mask_dir: ../lusc/tile_keep_masks
+  filtered_preprocess_base: ../lusc/stamp_preprocess_filtered
 
 advanced_config:
   seed: 42

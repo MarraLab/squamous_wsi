@@ -1,5 +1,6 @@
 # %%
 import numpy as np
+from pathlib import Path
 import pandas as pd
 from sklearn.metrics import confusion_matrix
 
@@ -12,7 +13,7 @@ df["y"] = (df["label"] == "bad_line").astype(int)
 
 
 import joblib
-bundle = joblib.load("/projects/marralab/rcorbett_prj/LUSC/tile_filter_model.joblib")
+bundle = joblib.load(Path("data/lusc/tile_filter_model.joblib"))
 model = bundle["model"]
 FEATURES = bundle["features"]
 df["bad_prob"] = model.predict_proba(df[FEATURES].values)[:, 1]

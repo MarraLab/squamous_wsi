@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import io
+import os
 import zipfile
 import re
 import joblib
@@ -23,8 +24,10 @@ from wsi_recurrence.tile_filter.zip_tiles import (
 # -------------------------
 # EDIT THESE
 # -------------------------
-MODEL_PATH = Path("/projects/marralab/rcorbett_prj/LUSC/tile_filter_model.joblib")
-CACHE_DIR = Path("/tmp/image_cache")
+DATA_ROOT = Path(os.environ.get("WSI_DATA_ROOT", "data"))
+PROJECT_DIR = DATA_ROOT / "lusc"
+MODEL_PATH = PROJECT_DIR / "tile_filter_model.joblib"
+CACHE_DIR = Path(os.environ.get("WSI_IMAGE_CACHE", ".cache/image_cache/lusc"))
 SLIDE_ID = "R_013"   # change for testing
 OUT_CSV = Path(f"{SLIDE_ID}_tile_predictions.csv")
 
@@ -114,7 +117,7 @@ import openslide
 print("\nGenerating QC overlay...")
 
 # Load slide thumbnail
-ndpi_path = Path(f"/projects/marralab/rcorbett_prj/LUSC/{SLIDE_ID}.ndpi")
+ndpi_path = PROJECT_DIR / f"{SLIDE_ID}.ndpi"
 
 slide = openslide.OpenSlide(str(ndpi_path))
 full_w, full_h = slide.dimensions

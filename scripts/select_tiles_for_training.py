@@ -33,8 +33,9 @@ SLIDE_IDS = [
     
 ]
 
-WSI_DIR = Path("/projects/marralab/rcorbett_prj/LUSC")
-H5_DIR = Path("/projects/marralab/rcorbett_prj/LUSC/stamp_preprocess/dino-bloom/wsi/dino-bloom-e8eb3d28")
+DATA_ROOT = Path("data")
+WSI_DIR = DATA_ROOT / "lusc"
+H5_DIR = WSI_DIR / "stamp_preprocess/dino-bloom/wsi/dino-bloom-e8eb3d28"
 LABEL_DIR = Path("./tile_labels")
 LABEL_DIR.mkdir(exist_ok=True)
 

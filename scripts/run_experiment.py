@@ -554,7 +554,7 @@ def main() -> None:
             if args.skip_preprocess:
                 raise RuntimeError(f"{model_name}: --skip-preprocess set but no feature_dir detected under {preprocess_base}")
             print(f"{prefix} 3) filtered feature_dir: (n/a)")
-            print(f"{prefix} 4) crossval: NOT READY (feature_dir still /tmp/)")
+            print(f"{prefix} 4) crossval: NOT READY (feature_dir not detected yet)")
             print(f"{prefix}    crossval command: {shlex.join(crossval_cmd)}")
             if args.analyze:
                 print(f"{prefix} 5) analyze: (skipped; crossval not run)")

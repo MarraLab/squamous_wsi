@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 from pathlib import Path
 import io
+import os
 import zipfile
 import re
 import joblib
@@ -16,9 +17,11 @@ from skimage.filters import sobel
 from wsi_recurrence.tile_filter.features import compute_features
 from wsi_recurrence.tile_filter.zip_tiles import build_zip_coord_index
 
-MODEL_PATH = Path("/projects/marralab/rcorbett_prj/LUSC/tile_filter_model.joblib")
-CACHE_DIR = Path("/tmp/image_cache")
-OUT_DIR = Path("/projects/marralab/rcorbett_prj/LUSC/tile_keep_masks")
+DATA_ROOT = Path(os.environ.get("WSI_DATA_ROOT", "data"))
+PROJECT_DIR = DATA_ROOT / "lusc"
+MODEL_PATH = PROJECT_DIR / "tile_filter_model.joblib"
+CACHE_DIR = Path(os.environ.get("WSI_IMAGE_CACHE", ".cache/image_cache/lusc"))
+OUT_DIR = PROJECT_DIR / "tile_keep_masks"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 THRESHOLD = 0.30

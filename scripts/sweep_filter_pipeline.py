@@ -418,7 +418,7 @@ def main() -> None:
         input_feature_dir = preprocess_out
     print(f"Input feature_dir (unfiltered): {input_feature_dir}")
 
-    cache_dir = Path(str(cfg.get("paths", {}).get("cache_dir", "/tmp/image_cache")))
+    cache_dir = Path(str(cfg.get("paths", {}).get("cache_dir", ".cache/image_cache")))
 
     tile_model = None
     feature_names: list[str] = []
@@ -429,6 +429,8 @@ def main() -> None:
             print("WARNING: Missing tile_filter.model_path in merged config; filtering step will be a no-op in dry-run.")
         else:
             raise ValueError("Missing tile_filter.model_path in merged config; cannot run filtering sweep.")
+    else:
+        model_path = _under_project(project_dir, model_path)
     if not args.dry_run:
         import joblib
 

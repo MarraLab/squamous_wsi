@@ -131,7 +131,7 @@ def build_stamp_config(cfg: Dict[str, Any], model_name: str, *, run_dir: Path) -
     if not stamp_table:
         raise ValueError("Missing paths.stamp_table (or legacy paths.clinical_table) in merged config.")
     stamp_table = Path(str(stamp_table))
-    cache_dir = Path(str(paths.get("cache_dir", "/tmp/image_cache")))
+    cache_dir = Path(str(paths.get("cache_dir", ".cache/image_cache")))
 
     preprocess_base = _join_under_project(project_dir, outputs.get("preprocess_base", "stamp_preprocess"))
     crossval_base = _join_under_project(project_dir, outputs.get("crossval_base", "stamp_crossval"))
@@ -160,7 +160,7 @@ def build_stamp_config(cfg: Dict[str, Any], model_name: str, *, run_dir: Path) -
         "crossval": {
             "output_dir": str(crossval_run_dir),
             "clini_table": str(stamp_table),
-            "feature_dir": "/tmp/",
+            "feature_dir": str(project_dir / "stamp_preprocess_placeholder"),
             "slide_table": str(stamp_table),
             "ground_truth_label": str(crossval.get("ground_truth_label", "recur")),
             "patient_label": str(crossval.get("patient_label", "patient")),

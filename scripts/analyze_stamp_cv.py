@@ -3,12 +3,12 @@
 Analyze existing STAMP crossval outputs (no training).
 
 Examples:
-  python analyze_stamp_cv.py --cv_root /projects/.../stamp_crossval/virchow-full/cv_low_mid_high --model_name virchow-full
-  python analyze_stamp_cv.py --cv_root /projects/.../stamp_crossval/virchow-full --cv_tag cv_low_mid_high --model_name virchow-full
-  python analyze_stamp_cv.py --cv_map /projects/.../stamp_analysis/sweep_auc_summary.csv
+  python analyze_stamp_cv.py --cv_root data/lusc/stamp_crossval/virchow-full/cv_low_mid_high --model_name virchow-full
+  python analyze_stamp_cv.py --cv_root data/lusc/stamp_crossval/virchow-full --cv_tag cv_low_mid_high --model_name virchow-full
+  python analyze_stamp_cv.py --cv_map data/lusc/stamp_analysis/sweep_auc_summary.csv
 
 Config-driven label/patient/probability columns:
-  python analyze_stamp_cv.py --project configs/project_vulvar.yaml --cv_root /projects/... --model_name ctranspath
+  python analyze_stamp_cv.py --project configs/project_vulvar.yaml --cv_root data/vulvar/stamp_crossval/ctranspath --model_name ctranspath
 """
 from __future__ import annotations
 
