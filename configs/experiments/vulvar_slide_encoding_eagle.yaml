@@ -1,0 +1,30 @@
+experiment:
+  name: vulvar_slide_eagle
+  description: Slide-level encoding with STAMP (EAGLE over ctranspath + virchow2 tile features).
+
+models:
+  - eagle_ctranspath_virchow2
+
+slide_encoding:
+  enabled: true
+  encoder: eagle
+  feat_model: ctranspath
+  agg_feat_model: virchow2
+  output_base: stamp_slide_encoding
+  device: cuda
+  generate_hash: true
+
+tile_filter:
+  enabled: false
+
+advanced_config:
+  seed: 42
+  max_epochs: 64
+  patience: 16
+  batch_size: 64
+  bag_size: 512
+  max_lr: 1e-4
+  div_factor: 25.0
+  model_name: mlp
+  model_params:
+    mlp: {}

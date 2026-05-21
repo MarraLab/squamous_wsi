@@ -1,0 +1,18 @@
+experiment:
+  name: lusc_slide_chief
+
+models:
+  - chief_chief-ctranspath
+
+slide_encoding:
+  enabled: true
+  encoder: chief
+  feat_model: chief-ctranspath
+  output_base: stamp_slide_encoding
+  device: cuda
+  generate_hash: true
+
+advanced_config:
+  model_name: mlp
+  model_params:
+    mlp: {}

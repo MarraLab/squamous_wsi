@@ -1,0 +1,26 @@
+experiment:
+  name: vulvar_slide_titan
+
+models:
+  - titan_conch1_5
+
+slide_encoding:
+  enabled: true
+  encoder: titan
+  feat_model: conch1_5
+  allow_unvalidated_pairing: true
+  output_base: stamp_slide_encoding
+  device: cuda
+  generate_hash: true
+
+advanced_config:
+  seed: 42
+  max_epochs: 32
+  patience: 16
+  batch_size: 64
+  bag_size: 512
+  max_lr: 1e-4
+  div_factor: 25.0
+  model_name: mlp
+  model_params:
+    mlp: {}

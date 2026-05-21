@@ -1,0 +1,41 @@
+experiment:
+  name: lusc_tile_mlp
+  description: Use FM results and aggregate with MLP 
+
+models:
+  - plip 
+  - ctranspath
+  - chief-ctranspath
+  - uni2
+  - dino-bloom
+  - gigapath
+  - h-optimus-0
+  - h-optimus-1
+  - virchow2
+  - virchow
+  - virchow-full
+  - mstar
+  - conch1_5
+  - conch
+  - keep
+
+tile_filter:
+  enabled: false
+  model_path: /projects/marralab/rcorbett_prj/LUSC/tile_filter_model.joblib
+  threshold: 0.30
+  keep_mask_dir: /projects/marralab/rcorbett_prj/LUSC/tile_keep_masks
+  filtered_preprocess_base: /projects/marralab/rcorbett_prj/LUSC/stamp_preprocess_filtered
+
+
+advanced_config:
+  seed: 42
+  max_epochs: 32
+  patience: 16
+  batch_size: 64
+  bag_size: 512
+  max_lr: 1e-4
+  div_factor: 25.0
+  model_name: mlp
+  model_params:
+    mlp: {}
+      
