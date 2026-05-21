@@ -20,12 +20,16 @@ from skimage.filters import sobel
 
 from wsi_recurrence.tile_filter.features import compute_features as compute_features_base
 from wsi_recurrence.tile_filter.zip_tiles import build_zip_coord_index, match_tile_name
+from wsi_recurrence.env import load_local_env
+
+
+load_local_env()
 
 # -------------------------
 # Edit these
 # -------------------------
 LABEL_CSV = Path("tile_labels/combined.csv")
-CACHE_DIR = Path(os.environ.get("WSI_IMAGE_CACHE", ".cache/image_cache/lusc"))
+CACHE_DIR = Path(os.environ.get("WSI_IMAGE_CACHE", os.environ.get("WSI_CACHE_ROOT", ".cache/image_cache") + "/lusc"))
 OUT_CSV = Path("all_tile_features.csv")
 
 # Coordinate matching tolerance in microns
@@ -328,8 +332,7 @@ df[(df["y"]==0)].sort_values("pred_prob", ascending=False).head(20)
 import joblib
 from pathlib import Path
 
-DATA_ROOT = Path(os.environ.get("WSI_DATA_ROOT", "data"))
-MODEL_PATH = DATA_ROOT / "lusc" / "tile_filter_model.joblib"
+MODEL_PATH = Path(os.environ.get("WSI_LUSC_ROOT", "data/lusc")) / "tile_filter_model.joblib"
 
 joblib.dump({
     "model": model,

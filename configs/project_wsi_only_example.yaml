@@ -10,13 +10,13 @@ analysis:
 
 paths:
   # Update these to your cohort.
-  project_dir: data/example_project
-  wsi_dir: data/example_project/wsi
-  cache_dir: .cache/image_cache
+  project_dir: ${WSI_DATA_ROOT}/example_project
+  wsi_dir: ${WSI_DATA_ROOT}/example_project/wsi
+  cache_dir: ${WSI_CACHE_ROOT}/example_project
 
   # Minimal STAMP slide/label table (required by STAMP preprocess/crossval).
   # Should include at least patient/filename/label columns used by your experiment.
-  stamp_table: data/example_project/stamp_table.csv
+  stamp_table: ${WSI_DATA_ROOT}/example_project/stamp_table.csv
 
 columns:
   pred_id: patient

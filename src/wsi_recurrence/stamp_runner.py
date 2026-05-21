@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 
 import yaml
 
+from wsi_recurrence.env import expand_env_vars, load_local_env
 from wsi_recurrence.slide_encoding import fs_safe_key, parse_slide_encoding_config
 
 
@@ -90,13 +91,14 @@ def _dump_yaml(obj: Dict[str, Any], path: Path) -> None:
 
 
 def _load_yaml(path: Path) -> Dict[str, Any]:
+    load_local_env()
     with path.open("r") as f:
         data = yaml.safe_load(f)
     if data is None:
         return {}
     if not isinstance(data, dict):
         raise ValueError(f"Expected YAML mapping at {path}, got {type(data).__name__}")
-    return data
+    return expand_env_vars(data)
 
 
 def _project_dir(cfg: Dict[str, Any]) -> Path:

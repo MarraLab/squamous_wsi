@@ -6,15 +6,18 @@ from typing import Any, Dict, Tuple
 import pandas as pd
 import yaml
 
+from wsi_recurrence.env import expand_env_vars, load_local_env
+
 
 def load_project_config(path: Path) -> Dict[str, Any]:
+    load_local_env()
     with path.open("r") as f:
         data = yaml.safe_load(f)
     if data is None:
         return {}
     if not isinstance(data, dict):
         raise ValueError(f"Expected YAML mapping at {path}, got {type(data).__name__}")
-    return data
+    return expand_env_vars(data)
 
 
 def analysis_defaults(project_cfg: Dict[str, Any]) -> Dict[str, Any]:

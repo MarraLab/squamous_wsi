@@ -8,6 +8,8 @@ from typing import Any, Dict, Tuple
 
 import yaml
 
+from wsi_recurrence.env import expand_env_vars, load_local_env
+
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(base)
@@ -24,13 +26,14 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
 
 
 def load_yaml(path: Path) -> Dict[str, Any]:
+    load_local_env()
     with path.open("r") as f:
         data = yaml.safe_load(f)
     if data is None:
         return {}
     if not isinstance(data, dict):
         raise ValueError(f"Expected YAML mapping at {path}, got {type(data).__name__}")
-    return data
+    return expand_env_vars(data)
 
 
 def dump_yaml(obj: Dict[str, Any], path: Path) -> None:

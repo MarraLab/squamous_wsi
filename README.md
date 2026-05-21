@@ -96,7 +96,101 @@ The project config separates:
 - `columns.*`: labels and prediction ID columns.
 - `clinical.*`: merge keys, stage column, event indicator, and optional time-to-event columns.
 
-For a new cohort, copy a project YAML and update all absolute paths and column names before running anything expensive.
+Project YAML files can use environment variables such as `${WSI_DATA_ROOT}` and `${WSI_LUSC_ROOT}`. The code automatically loads `.env.local` from the repository root if it exists, and shell or scheduler environment variables take precedence over values in that file.
+
+## Configure Local Data Roots
+
+Machine-specific paths should live in `.env.local`, which is ignored by git. Start from the example:
+
+```bash
+cp .env.example .env.local
+```
+
+Edit `.env.local` for your filesystem:
+
+```bash
+WSI_DATA_ROOT=/path/to/wsi_projects
+WSI_LUSC_ROOT=${WSI_DATA_ROOT}/lusc
+WSI_VULVAR_ROOT=${WSI_DATA_ROOT}/vulvar
+WSI_CACHE_ROOT=/path/to/stamp_image_cache
+```
+
+The committed project configs then resolve paths like:
+
+```yaml
+paths:
+  project_dir: ${WSI_LUSC_ROOT}
+  wsi_dir: ${WSI_LUSC_ROOT}
+  cache_dir: ${WSI_CACHE_ROOT}/lusc
+  stamp_table: ${WSI_LUSC_ROOT}/clin.csv
+```
+
+For a new cohort, either set a new environment variable such as `WSI_MY_COHORT_ROOT=/path/to/my_cohort`, or use `${WSI_DATA_ROOT}/my_cohort` directly in a copied project YAML.
+
+## Quickstart With Your Own Cohort
+
+Create a cohort folder. A minimal WSI-only layout is:
+
+```text
+${WSI_DATA_ROOT}/my_cohort/
+  wsi/
+    slide_001.svs
+    slide_002.svs
+  stamp_table.csv
+```
+
+Create a STAMP table with at least patient ID, slide filename, and label columns. The configured `crossval.patient_label`, `crossval.filename_label`, and `crossval.ground_truth_label` must match these headers.
+
+```csv
+patient,filename,recur
+case_001,slide_001.svs,0
+case_002,slide_002.svs,1
+```
+
+Copy the WSI-only template:
+
+```bash
+cp configs/project_wsi_only_example.yaml configs/project_my_cohort.yaml
+```
+
+Edit the copy:
+
+```yaml
+project:
+  name: my_cohort
+
+analysis:
+  run_fusion: false
+
+paths:
+  project_dir: ${WSI_DATA_ROOT}/my_cohort
+  wsi_dir: ${WSI_DATA_ROOT}/my_cohort/wsi
+  cache_dir: ${WSI_CACHE_ROOT}/my_cohort
+  stamp_table: ${WSI_DATA_ROOT}/my_cohort/stamp_table.csv
+
+columns:
+  pred_id: patient
+  label: recur
+
+crossval:
+  ground_truth_label: recur
+  patient_label: patient
+  filename_label: filename
+```
+
+Start with a dry run using an existing experiment YAML:
+
+```bash
+python scripts/run_experiment.py \
+  --project configs/project_my_cohort.yaml \
+  --experiment configs/experiments/lusc_linear.yaml \
+  --dry-run \
+  --models ctranspath \
+  --analyze \
+  --plot
+```
+
+For clinical fusion, set `analysis.run_fusion: true`, add `paths.clinical_features_table`, and update the `clinical.*` merge/outcome columns before adding `--fusion`.
 
 ## Running an experiment
 
@@ -105,7 +199,7 @@ Start with a dry run. This prints the commands and creates a run manifest withou
 ```bash
 python scripts/run_experiment.py \
   --project configs/project_lusc.yaml \
-  --experiment configs/experiments/example_stamp_qc03.yaml \
+  --experiment configs/experiments/lusc_linear.yaml \
   --dry-run \
   --models ctranspath \
   --analyze \
@@ -118,7 +212,7 @@ Run the experiment once the planned commands look correct:
 ```bash
 python scripts/run_experiment.py \
   --project configs/project_lusc.yaml \
-  --experiment configs/experiments/example_stamp_qc03.yaml \
+  --experiment configs/experiments/lusc_linear.yaml \
   --execute \
   --models ctranspath \
   --analyze \
@@ -131,7 +225,7 @@ To run every model listed in the experiment YAML, omit `--models`. To reuse exis
 ```bash
 python scripts/run_experiment.py \
   --project configs/project_lusc.yaml \
-  --experiment configs/experiments/example_stamp_qc03.yaml \
+  --experiment configs/experiments/lusc_linear.yaml \
   --execute \
   --reuse-existing \
   --analyze \
@@ -270,7 +364,7 @@ The experiment YAML can point to a trained `tile_filter_model.joblib`, `keep_mas
 ## Adapting to a new cohort
 
 1. Copy `configs/project_wsi_only_example.yaml` or an existing cohort YAML.
-2. Update `paths.project_dir`, `paths.wsi_dir`, `paths.stamp_table`, and `paths.clinical_features_table`.
+2. Set local roots in `.env.local`, then update `paths.project_dir`, `paths.wsi_dir`, `paths.stamp_table`, and optionally `paths.clinical_features_table`.
 3. Update `columns.label`, `columns.pred_id`, and `clinical.*` mappings.
 4. Copy an experiment YAML and choose the model list and tile-filter settings.
 5. Run a single-model dry run.

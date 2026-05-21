@@ -27,6 +27,7 @@ stamp_crossval/
 stamp_crossval_runs/
 
 # Local scratch/log files
+.env.local
 *.log
 *.tmp
 *.bak

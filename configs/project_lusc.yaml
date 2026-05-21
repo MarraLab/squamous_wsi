@@ -9,11 +9,11 @@ analysis:
   outcome_event_col: null
 
 paths:
-  project_dir: data/lusc
-  wsi_dir: data/lusc
-  cache_dir: .cache/image_cache/lusc
-  stamp_table: data/lusc/clin.csv
-  clinical_features_table: data/lusc/260310LUSCrecurrence_deID.csv
+  project_dir: ${WSI_LUSC_ROOT}
+  wsi_dir: ${WSI_LUSC_ROOT}
+  cache_dir: ${WSI_CACHE_ROOT}/lusc
+  stamp_table: ${WSI_LUSC_ROOT}/clin.csv
+  clinical_features_table: ${WSI_LUSC_ROOT}/260310LUSCrecurrence_deID.csv
 
 columns:
   pred_id: patient
@@ -27,13 +27,6 @@ clinical:
   event_col: recurrence (1=yes)
   event_positive_value: 1
   drop_missing_time: true
-
-  date_surgery_col: date of surgery
-  date_followup_col: date of recurrence or most recent followup
-
-  event_col: recurrence (1=yes)
-  event_positive_value: 1   # <-- critical
-  drop_missing_time: true  
 
 outputs:
   preprocess_base: stamp_preprocess

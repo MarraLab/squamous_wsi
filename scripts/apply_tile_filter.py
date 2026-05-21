@@ -19,15 +19,18 @@ from wsi_recurrence.tile_filter.zip_tiles import (
     build_zip_coord_index,
     parse_tile_coords,
 )
+from wsi_recurrence.env import load_local_env
+
+
+load_local_env()
 
 
 # -------------------------
 # EDIT THESE
 # -------------------------
-DATA_ROOT = Path(os.environ.get("WSI_DATA_ROOT", "data"))
-PROJECT_DIR = DATA_ROOT / "lusc"
+PROJECT_DIR = Path(os.environ.get("WSI_LUSC_ROOT", "data/lusc"))
 MODEL_PATH = PROJECT_DIR / "tile_filter_model.joblib"
-CACHE_DIR = Path(os.environ.get("WSI_IMAGE_CACHE", ".cache/image_cache/lusc"))
+CACHE_DIR = Path(os.environ.get("WSI_IMAGE_CACHE", os.environ.get("WSI_CACHE_ROOT", ".cache/image_cache") + "/lusc"))
 SLIDE_ID = "R_013"   # change for testing
 OUT_CSV = Path(f"{SLIDE_ID}_tile_predictions.csv")
 

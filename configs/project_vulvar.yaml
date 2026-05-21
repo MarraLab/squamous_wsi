@@ -10,13 +10,13 @@ analysis:
 
 paths:
   # Update these to your cohort.
-  project_dir: data/vulvar
-  wsi_dir: data/vulvar/merged
-  cache_dir: .cache/image_cache/vulvar
+  project_dir: ${WSI_VULVAR_ROOT}
+  wsi_dir: ${WSI_VULVAR_ROOT}/merged
+  cache_dir: ${WSI_CACHE_ROOT}/vulvar
 
   # Minimal STAMP slide/label table (required by STAMP preprocess/crossval).
   # Should include at least patient/filename/label columns used by your experiment.
-  stamp_table: data/vulvar/merged/vulvar.csv
+  stamp_table: ${WSI_VULVAR_ROOT}/merged/vulvar.csv
 
 columns:
   pred_id: case_id

@@ -16,11 +16,14 @@ from skimage.filters import sobel
 
 from wsi_recurrence.tile_filter.features import compute_features
 from wsi_recurrence.tile_filter.zip_tiles import build_zip_coord_index
+from wsi_recurrence.env import load_local_env
 
-DATA_ROOT = Path(os.environ.get("WSI_DATA_ROOT", "data"))
-PROJECT_DIR = DATA_ROOT / "lusc"
+
+load_local_env()
+
+PROJECT_DIR = Path(os.environ.get("WSI_LUSC_ROOT", "data/lusc"))
 MODEL_PATH = PROJECT_DIR / "tile_filter_model.joblib"
-CACHE_DIR = Path(os.environ.get("WSI_IMAGE_CACHE", ".cache/image_cache/lusc"))
+CACHE_DIR = Path(os.environ.get("WSI_IMAGE_CACHE", os.environ.get("WSI_CACHE_ROOT", ".cache/image_cache") + "/lusc"))
 OUT_DIR = PROJECT_DIR / "tile_keep_masks"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 

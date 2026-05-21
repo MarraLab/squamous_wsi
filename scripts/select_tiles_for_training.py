@@ -1,6 +1,7 @@
 # %%
 from pathlib import Path
 import csv
+import os
 
 import h5py
 import numpy as np
@@ -10,6 +11,10 @@ from PIL import Image
 import plotly.graph_objects as go
 import ipywidgets as widgets
 from IPython.display import display
+from wsi_recurrence.env import load_local_env
+
+
+load_local_env()
 
 # -------------------------
 # Edit these
@@ -33,8 +38,7 @@ SLIDE_IDS = [
     
 ]
 
-DATA_ROOT = Path("data")
-WSI_DIR = DATA_ROOT / "lusc"
+WSI_DIR = Path(os.environ.get("WSI_LUSC_ROOT", "data/lusc"))
 H5_DIR = WSI_DIR / "stamp_preprocess/dino-bloom/wsi/dino-bloom-e8eb3d28"
 LABEL_DIR = Path("./tile_labels")
 LABEL_DIR.mkdir(exist_ok=True)

@@ -14,12 +14,19 @@ from sklearn.metrics import average_precision_score, precision_recall_curve, roc
 from sklearn.model_selection import StratifiedKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from wsi_recurrence.env import load_local_env
 
 
 # %%
-DATA_ROOT = Path(os.environ.get("WSI_DATA_ROOT", "data"))
-EXCEL_PATH = DATA_ROOT / "vulvar" / "Lien VSCC clinical data (selected cases from Master).xlsx"
-METADATA_PATH = DATA_ROOT / "vulvar" / "original_files" / "vulvar_clin.csv"
+load_local_env()
+VULVAR_ROOT = Path(os.environ.get("WSI_VULVAR_ROOT", "data/vulvar"))
+EXCEL_PATH = Path(
+    os.environ.get(
+        "WSI_VULVAR_EXCEL_PATH",
+        str(VULVAR_ROOT / "Lien VSCC clinical data (selected cases from Master).xlsx"),
+    )
+)
+METADATA_PATH = VULVAR_ROOT / "original_files" / "vulvar_clin.csv"
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = PROJECT_DIR / "outputs" / "vulvar_excel_tests"
 EDA_DIR = OUTPUT_DIR / "eda"
