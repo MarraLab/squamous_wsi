@@ -1,0 +1,24 @@
+name: slides-stamp-py313
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.13
+  - pip
+  - numpy
+  - pandas
+  - matplotlib
+  - seaborn
+  - scikit-learn
+  - scikit-image
+  - pillow
+  - pyyaml
+  - joblib
+  - h5py
+  - tqdm
+  - scipy
+  - lifelines
+  - pytest
+  - pip:
+    - openslide-python
+    - stamp  # replace with the STAMP package name/version you use

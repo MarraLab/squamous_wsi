@@ -46,6 +46,31 @@ python -m pip install -e .
 
 This package intentionally keeps `pyproject.toml` minimal. In practice, the pipeline uses common scientific Python packages such as `numpy`, `pandas`, `matplotlib`, `scikit-learn`, `pyyaml`, and `joblib`. STAMP itself and any WSI backend dependencies must be installed in the environment where experiments are run.
 
+Conda/Mamba environment (recommended)
+
+To make it easy to reproduce the `slides-stamp-py313` environment used during development, a starter `environment.yml` is provided at the repository root. It contains common scientific packages and a small `pip` section for WSI backends or STAMP if those are only available via PyPI. Create the environment with `mamba` (fast) or `conda`:
+
+```bash
+mamba env create -f environment.yml
+mamba activate slides-stamp-py313
+# then install this package in editable mode
+python -m pip install --upgrade pip
+python -m pip install -e .
+```
+
+If you prefer a pip-only workflow, a minimal `requirements.txt` is easy to create from the `environment.yml` contents and used with `pip install -r requirements.txt`.
+
+System libraries (WSI backends)
+
+Some slide backends require OS-level libraries in addition to the Python bindings. For example, the OpenSlide Python bindings need the `libopenslide` system library. On Debian/Ubuntu install the runtime and development headers before creating the environment:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y libopenslide0 libopenslide-dev
+```
+
+If your environment uses other WSI backends (vendor SDKs, GPU drivers, or private STAMP packages), document those separately and install them prior to running the pipeline.
+
 To verify the local install:
 
 ```bash
