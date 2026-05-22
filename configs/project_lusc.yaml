@@ -3,10 +3,14 @@ project:
 
 analysis:
   run_fusion: true
-  clinical_path: null
-  clinical_features: []
-  outcome_time_col: null
-  outcome_event_col: null
+  clinical_features:
+    - stage_cont
+  fusion_model:
+    C: 0.01
+    class_weight: balanced
+    solver: lbfgs
+    max_iter: 5000
+  clinical_path: ${WSI_LUSC_ROOT}/260310LUSCrecurrence_deID.csv
 
 paths:
   project_dir: ${WSI_LUSC_ROOT}
@@ -18,6 +22,14 @@ paths:
 columns:
   pred_id: patient
   label: recur
+
+validation:
+  expected_n_patients: 152
+  expected_n_positive: 47
+  expected_n_negative: 105
+  patient_col: patient
+  label_col: recur
+  strict_feature_validation: false
 
 clinical:
   id_col: final scan name

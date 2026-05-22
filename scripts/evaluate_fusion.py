@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
 
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from wsi_recurrence.clinical import (
     add_time_to_event_event_columns,

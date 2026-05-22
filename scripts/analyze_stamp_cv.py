@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import logging
 from pathlib import Path
+import sys
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
@@ -22,6 +23,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import average_precision_score, roc_auc_score, roc_curve
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import sys
 

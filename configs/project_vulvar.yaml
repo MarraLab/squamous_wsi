@@ -2,25 +2,37 @@ project:
   name: vulvar
 
 analysis:
-  run_fusion: false
-  clinical_path: null
-  clinical_features: []
+  run_fusion: true
+  clinical_path: ${WSI_VULVAR_ROOT}/original_files/vulvar_clin.csv
+  clinical_features:
+    - has_lymph_node
+    - has_invasion
+    - hpv_p53_group
+  fusion_model:
+    C: 0.3
+    class_weight: balanced
+    solver: lbfgs
+    max_iter: 5000
   outcome_time_col: null
   outcome_event_col: null
 
 paths:
   # Update these to your cohort.
   project_dir: ${WSI_VULVAR_ROOT}
-  wsi_dir: ${WSI_VULVAR_ROOT}/merged
+  wsi_dir: ${WSI_VULVAR_ROOT}/symlinkied_tidy
   cache_dir: ${WSI_CACHE_ROOT}/vulvar
 
   # Minimal STAMP slide/label table (required by STAMP preprocess/crossval).
   # Should include at least patient/filename/label columns used by your experiment.
-  stamp_table: ${WSI_VULVAR_ROOT}/merged/vulvar.csv
+  stamp_table: ${WSI_VULVAR_ROOT}/original_files/vulvar_clin.csv
+  clinical_features_table: ${WSI_VULVAR_ROOT}/original_files/vulvar_clin.csv
 
 columns:
-  pred_id: case_id
-  label: risk
+  pred_id: patient
+  label: has_recurrence
+
+clinical:
+  id_col: patient
 
 outputs:
   preprocess_base: stamp_preprocess
@@ -33,7 +45,25 @@ stamp:
 
 crossval:
   task: classification
-  ground_truth_label: risk
-  patient_label: case_id
+  ground_truth_label: has_recurrence
+  patient_label: patient
   filename_label: filename
   n_splits: 5
+
+advanced_config:
+  seed: 42
+  max_epochs: 32
+  patience: 16
+  batch_size: 64
+  bag_size: 512
+  max_lr: 1e-4
+  div_factor: 25.0
+  model_name: vit
+  model_params:
+    vit:
+      dim_model: 512
+      dim_feedforward: 512
+      n_heads: 8
+      n_layers: 2
+      dropout: 0.25
+      use_alibi: false

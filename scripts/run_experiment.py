@@ -11,6 +11,8 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
 from wsi_recurrence.experiment import (
     build_manifest,
     create_run_dir,

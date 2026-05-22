@@ -3,9 +3,12 @@
 import argparse
 from pathlib import Path
 import re
+import sys
 
 import pandas as pd
 import matplotlib.pyplot as plt
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from wsi_recurrence.metrics import compute_auc, compute_pr_auc, plot_pr, plot_roc
 from wsi_recurrence.clinical import analysis_defaults, load_project_config
