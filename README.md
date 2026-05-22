@@ -37,6 +37,13 @@ tests/
 
 Use Python 3.10 or newer. The recommended path is the Conda/Mamba environment because `pyproject.toml` intentionally keeps package metadata minimal and does not install the scientific stack for you.
 
+Start by cloning the repository and entering the checkout:
+
+```bash
+git clone https://github.com/MarraLab/squamous_wsi.git
+cd squamous_wsi
+```
+
 To reproduce the `slides-stamp-py313` environment used during development, start from the provided `environment.yml`:
 
 ```bash
