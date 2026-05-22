@@ -53,7 +53,7 @@ python -m pip install --upgrade pip
 python -m pip install -e .
 ```
 
-The `environment.yml` includes common scientific dependencies (`numpy`, `pandas`, `matplotlib`, `seaborn`, `scikit-learn`, `scikit-image`, `h5py`, `pyyaml`, `joblib`, `lifelines`, and test tooling). The `pip` entry for `stamp` is a placeholder for the STAMP package or internal install method used in your environment; replace it with the correct package name/version, or remove it and install STAMP separately.
+The `environment.yml` includes common scientific dependencies (`numpy`, `pandas`, `matplotlib`, `seaborn`, `scikit-learn`, `scikit-image`, `h5py`, `pyyaml`, `joblib`, `lifelines`, and test tooling) plus `openslide-python`. It intentionally does not install STAMP. Install the STAMP WSI package used by your lab or project separately in the same environment.
 
 For a pip-only environment, install the runtime dependencies explicitly before installing this package:
 
@@ -65,7 +65,7 @@ python -m pip install numpy pandas matplotlib seaborn scikit-learn scikit-image 
 python -m pip install -e .
 ```
 
-Install STAMP in the same environment as well. The pipeline invokes the `stamp` CLI directly, so this should work before running an experiment:
+Do not install the unrelated PyPI package named `stamp`; it is an older package with incompatible dependencies and is not the STAMP CLI used here. After installing the correct STAMP package, the pipeline invokes the `stamp` CLI directly, so this should work before running an experiment:
 
 ```bash
 stamp --help

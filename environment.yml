@@ -21,4 +21,3 @@ dependencies:
   - pytest
   - pip:
     - openslide-python
-    - stamp  # replace with the STAMP package name/version you use
