@@ -35,30 +35,34 @@ tests/
 
 ## Installation
 
-Use Python 3.10 or newer. From the repository root:
+Use Python 3.10 or newer. The recommended path is the Conda/Mamba environment because `pyproject.toml` intentionally keeps package metadata minimal and does not install the scientific stack for you.
+
+To reproduce the `slides-stamp-py313` environment used during development, start from the provided `environment.yml`:
+
+```bash
+mamba env create -f environment.yml
+mamba activate slides-stamp-py313
+python -m pip install --upgrade pip
+python -m pip install -e .
+```
+
+The `environment.yml` includes common scientific dependencies (`numpy`, `pandas`, `matplotlib`, `seaborn`, `scikit-learn`, `scikit-image`, `h5py`, `pyyaml`, `joblib`, `lifelines`, and test tooling). The `pip` entry for `stamp` is a placeholder for the STAMP package or internal install method used in your environment; replace it with the correct package name/version, or remove it and install STAMP separately.
+
+For a pip-only environment, install the runtime dependencies explicitly before installing this package:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
+python -m pip install numpy pandas matplotlib seaborn scikit-learn scikit-image pillow pyyaml joblib h5py tqdm scipy lifelines pytest openslide-python
 python -m pip install -e .
 ```
 
-This package intentionally keeps `pyproject.toml` minimal. In practice, the pipeline uses common scientific Python packages such as `numpy`, `pandas`, `matplotlib`, `scikit-learn`, `pyyaml`, and `joblib`. STAMP itself and any WSI backend dependencies must be installed in the environment where experiments are run.
-
-Conda/Mamba environment (recommended)
-
-To make it easy to reproduce the `slides-stamp-py313` environment used during development, a starter `environment.yml` is provided at the repository root. It contains common scientific packages and a small `pip` section for WSI backends or STAMP if those are only available via PyPI. Create the environment with `mamba` (fast) or `conda`:
+Install STAMP in the same environment as well. The pipeline invokes the `stamp` CLI directly, so this should work before running an experiment:
 
 ```bash
-mamba env create -f environment.yml
-mamba activate slides-stamp-py313
-# then install this package in editable mode
-python -m pip install --upgrade pip
-python -m pip install -e .
+stamp --help
 ```
-
-If you prefer a pip-only workflow, a minimal `requirements.txt` is easy to create from the `environment.yml` contents and used with `pip install -r requirements.txt`.
 
 System libraries (WSI backends)
 
@@ -71,13 +75,15 @@ sudo apt-get install -y libopenslide0 libopenslide-dev
 
 If your environment uses other WSI backends (vendor SDKs, GPU drivers, or private STAMP packages), document those separately and install them prior to running the pipeline.
 
-To verify the local install:
+To verify the local install without data:
 
 ```bash
+python -c "from pathlib import Path; import wsi_recurrence; p=Path(wsi_recurrence.__file__).resolve(); assert p.is_relative_to(Path.cwd().resolve() / 'src'), p; print(p)"
+python scripts/run_experiment.py --help
 python -m pytest tests
 ```
 
-Some tests or workflows may require optional WSI dependencies and local data paths. Synthetic tests are intended to cover most code paths without requiring the full slide dataset.
+The unit tests are synthetic and are intended to cover most code paths without requiring the full slide dataset. Full experiment execution still requires STAMP, WSI backend dependencies, GPUs if configured, and local slide/table paths.
 
 ## Inputs you need
 
@@ -240,7 +246,9 @@ Each run is written under:
 ```text
 outputs/runs/<experiment_name>_<timestamp>/
   manifest.yaml
-  stamp_configs/
+  configs/
+    stamp/
+      config_<model>.yaml
   analysis/
     <model>/
       all_predictions_<model>.csv
